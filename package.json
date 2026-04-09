@@ -1,0 +1,21 @@
+{
+  "name": "pangofold",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "dev:web": "turbo dev --filter=@pangofold/web",
+    "build:web": "turbo build --filter=@pangofold/web",
+    "clean": "turbo clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.9.5",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@10.7.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

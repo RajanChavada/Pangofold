@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Pangofold",
+    "slug": "pangofold",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "pangofold",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.pangofold.app",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.pangofold.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f766e"
+      }
+    },
+    "plugins": ["expo-router"]
+  }
+}
