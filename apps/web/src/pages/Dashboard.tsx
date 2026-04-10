@@ -198,36 +198,41 @@ export function Dashboard() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 mt-4">
-                  <Link
-                    to={`/trip/${trip.id}`}
-                    className="flex-1 text-center py-2 px-4 rounded-xl bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors"
-                  >
-                    View
-                  </Link>
-                  <Link
-                    to={`/trip/${trip.id}/edit`}
-                    className="flex-1 text-center py-2 px-4 rounded-xl bg-surface-muted text-text-muted text-sm font-medium hover:bg-surface-muted/80 hover:text-text transition-colors"
-                  >
-                    Edit
-                  </Link>
+                <div className="mt-4 space-y-2">
+                  <div className="flex gap-2">
+                    <Link
+                      to={`/trip/${trip.id}`}
+                      className="flex-1 text-center py-2 px-4 rounded-xl bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors"
+                    >
+                      View
+                    </Link>
+                    <Link
+                      to={`/trip/${trip.id}/edit`}
+                      className="flex-1 text-center py-2 px-4 rounded-xl bg-surface-muted text-text-muted text-sm font-medium hover:bg-surface-muted/80 hover:text-text transition-colors"
+                    >
+                      Edit
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => copyShareLink(trip.share_slug)}
+                      className="flex flex-1 items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-surface-muted text-text-muted text-sm font-medium hover:bg-surface-muted/80 hover:text-text transition-colors cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Share
+                    </button>
+                  </div>
                   <button
-                    onClick={() => copyShareLink(trip.share_slug)}
-                    className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-surface-muted text-text-muted text-sm font-medium hover:bg-surface-muted/80 hover:text-text transition-colors cursor-pointer"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    Share
-                  </button>
-                  <button
+                    type="button"
                     onClick={() => {
                       if (window.confirm(`Delete "${trip.title}"? This cannot be undone.`)) {
                         deleteTrip(trip.id);
                       }
                     }}
                     disabled={deletingId === trip.id}
-                    className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-red-500 text-sm font-medium hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
+                    Delete trip
                   </button>
                 </div>
               </div>
