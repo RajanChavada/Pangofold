@@ -15,12 +15,17 @@ import { useNavigate, Link } from "react-router";
 import { cn } from "../lib/cn";
 import { supabase } from "../lib/supabase";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { PhaseBanner } from "./PhaseBanner";
 
 interface TripHeaderProps {
   trip: Trip;
   editable?: boolean;
+  /** Status strip + actions directly under the cover image */
+  showPhaseBanner?: boolean;
   /** Marks the trip complete and navigates to the Wrapped report (owner view). */
   onFinishTrip?: () => void;
+  /** Sets phase back to active so the owner can edit and finish again later. */
+  onReopenTrip?: () => void;
 }
 
 function formatDateRange(start: string, end: string): string {
@@ -33,7 +38,13 @@ function formatDateRange(start: string, end: string): string {
   return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}, ${s.getFullYear()}`;
 }
 
-export function TripHeader({ trip, editable = false, onFinishTrip }: TripHeaderProps) {
+export function TripHeader({
+  trip,
+  editable = false,
+  showPhaseBanner = false,
+  onFinishTrip,
+  onReopenTrip,
+}: TripHeaderProps) {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -62,6 +73,9 @@ export function TripHeader({ trip, editable = false, onFinishTrip }: TripHeaderP
     }
   };
 
+  const showReopen = Boolean(onReopenTrip && trip.phase === "completed");
+  const showFinishCta = Boolean(onFinishTrip && trip.phase !== "completed");
+
   return (
     <div className="relative">
       <ConfirmDialog
@@ -78,17 +92,43 @@ export function TripHeader({ trip, editable = false, onFinishTrip }: TripHeaderP
         onConfirm={() => void handleDelete()}
       />
       {trip.coverImageUrl && (
-        <div className="h-48 w-full overflow-hidden rounded-b-3xl">
+        <div className="relative h-48 w-full overflow-hidden rounded-b-3xl">
           <img
             src={trip.coverImageUrl}
             alt={trip.title}
             className="h-full w-full object-cover"
           />
-          <div className="absolute inset-0 h-48 bg-gradient-to-t from-black/40 to-transparent rounded-b-3xl" />
+          <div className="absolute inset-0 h-48 bg-gradient-to-t from-black/40 to-transparent rounded-b-3xl pointer-events-none" />
         </div>
       )}
 
-      <div className={cn("px-5 pb-4", trip.coverImageUrl ? "pt-4 -mt-16 relative z-10" : "pt-6")}>
+      {showPhaseBanner && (
+        <div className="px-5 pt-3 space-y-2">
+          <PhaseBanner
+            trip={trip}
+            variant="underHeader"
+            onReopenTrip={onReopenTrip}
+            showReopen={showReopen}
+          />
+          {showFinishCta && onFinishTrip && (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={onFinishTrip}
+                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold text-sm shadow-md hover:opacity-95 cursor-pointer"
+              >
+                <PartyPopper className="w-5 h-5 shrink-0" />
+                Finish trip &amp; view Wrapped
+              </button>
+              <p className="text-[11px] text-text-muted text-center px-1">
+                Marks this trip complete and opens your spend &amp; superlatives report.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className={cn("px-5 pb-4", trip.coverImageUrl ? "pt-4" : "pt-6")}>
         <div className="flex items-start justify-between gap-3">
           <button
             onClick={() => navigate("/dashboard")}
@@ -106,16 +146,6 @@ export function TripHeader({ trip, editable = false, onFinishTrip }: TripHeaderP
               >
                 <BarChart3 className="w-4 h-4" />
               </Link>
-            )}
-            {editable && onFinishTrip && trip.phase !== "completed" && (
-              <button
-                type="button"
-                onClick={onFinishTrip}
-                className="p-2 rounded-xl hover:bg-amber-50 text-amber-700 transition-colors"
-                title="Finish trip & view Wrapped"
-              >
-                <PartyPopper className="w-4 h-4" />
-              </button>
             )}
             {editable && (
               <Link
@@ -152,10 +182,11 @@ export function TripHeader({ trip, editable = false, onFinishTrip }: TripHeaderP
             <MapPin className="w-4 h-4" />
             <span className="text-xs font-semibold tracking-wide uppercase">Pangofold</span>
           </div>
-          <h1 className={cn(
-            "text-2xl font-bold tracking-tight leading-tight",
-            trip.coverImageUrl && "text-white drop-shadow-sm",
-          )}>
+          <h1
+            className={cn(
+              "text-2xl font-bold tracking-tight leading-tight text-text",
+            )}
+          >
             {trip.title}
           </h1>
           {trip.startDate && trip.endDate && (

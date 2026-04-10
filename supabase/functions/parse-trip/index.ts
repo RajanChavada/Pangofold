@@ -10,13 +10,87 @@ const ANTHROPIC_AUTH_TOKEN = Deno.env.get("ANTHROPIC_AUTH_TOKEN") ?? "";
 const ANTHROPIC_BASE_URL = Deno.env.get("ANTHROPIC_BASE_URL") ?? "https://api.z.ai/api/anthropic";
 const MODEL = Deno.env.get("MODEL") ?? "glm-4.5-air";
 
+async function sha256Hex(text: string): Promise<string> {
+  const buf = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function normKey(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeDocUrl(url: string): string {
+  const m = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : url.trim();
+}
+
+/** In-memory set for O(1) duplicate detection (avoids trusting the LLM alone). */
+async function loadFingerprintSet(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const { data: dests } = await supabase.from("destinations").select("id, name").eq("trip_id", tripId);
+  for (const d of dests || []) {
+    const destId = d.id as string;
+    const { data: foods } = await supabase.from("food_spots").select("name").eq("destination_id", destId);
+    for (const f of foods || []) {
+      keys.add(`f:${destId}:${normKey(String(f.name ?? ""))}`);
+    }
+    const { data: acts } = await supabase.from("activities").select("name").eq("destination_id", destId);
+    for (const a of acts || []) {
+      keys.add(`a:${destId}:${normKey(String(a.name ?? ""))}`);
+    }
+    const { data: days } = await supabase
+      .from("day_itineraries")
+      .select("id, day_number")
+      .eq("destination_id", destId);
+    for (const day of days || []) {
+      const { data: items } = await supabase.from("itinerary_items").select("title").eq("day_id", day.id);
+      const dn = day.day_number as number;
+      for (const it of items || []) {
+        keys.add(`i:${destId}:${dn}:${normKey(String(it.title ?? ""))}`);
+      }
+    }
+  }
+  return keys;
+}
+
+function fingerprintSummaryForPrompt(fp: Set<string>, maxLines: number): string {
+  if (fp.size === 0) return "(no existing planner rows yet)";
+  const lines: string[] = [];
+  for (const k of fp) {
+    lines.push(`- ${k}`);
+    if (lines.length >= maxLines) {
+      lines.push("... (truncated — never duplicate matching titles)");
+      break;
+    }
+  }
+  return lines.join("\n");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const { title, textContent, links, imageUrls, docUrl, userId, structured, mapsResolved } = await req.json();
+    const body = await req.json();
+    const {
+      title,
+      textContent,
+      links,
+      imageUrls,
+      docUrl,
+      userId,
+      structured,
+      mapsResolved,
+      mode,
+      tripId: bodyTripId,
+    } = body;
 
     if (!userId) {
       return new Response(JSON.stringify({ error: "Missing userId" }), {
@@ -29,6 +103,20 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
+
+    if (mode === "append" && bodyTripId) {
+      return await handleAppendResync(supabase, {
+        title,
+        textContent,
+        links: links || [],
+        imageUrls,
+        docUrl,
+        userId,
+        tripId: bodyTripId,
+        structured,
+        mapsResolved,
+      });
+    }
 
     const tripJson = await parseWithAI(title, textContent, links, structured, mapsResolved);
 
@@ -53,6 +141,7 @@ serve(async (req) => {
     }
 
     const docUrlNorm = typeof docUrl === "string" && docUrl.length > 0 ? docUrl : null;
+    const contentHash = await sha256Hex(textContent);
 
     let tripId: string;
     let shareSlug: string;
@@ -76,6 +165,7 @@ serve(async (req) => {
             start_date: tripJson.startDate || null,
             end_date: tripJson.endDate || null,
             raw_doc_text: textContent,
+            raw_doc_content_hash: contentHash,
             cover_image_url: imageUrls?.[0] || null,
           })
           .eq("id", existing.id)
@@ -95,6 +185,7 @@ serve(async (req) => {
             source_doc_url: docUrlNorm,
             owner_id: userId,
             raw_doc_text: textContent,
+            raw_doc_content_hash: contentHash,
             cover_image_url: imageUrls?.[0] || null,
           })
           .select()
@@ -114,6 +205,7 @@ serve(async (req) => {
           source_doc_url: null,
           owner_id: userId,
           raw_doc_text: textContent,
+          raw_doc_content_hash: contentHash,
           cover_image_url: imageUrls?.[0] || null,
         })
         .select()
@@ -580,4 +672,383 @@ function extractJsonObject(text: string): string | null {
   } catch {
     return null;
   }
+}
+
+async function parseWithAIAppend(
+  title: string,
+  textContent: string,
+  links: string[],
+  structured: unknown,
+  mapsResolved: unknown,
+  existingFingerprintsBlock: string,
+  appendHint: string,
+): Promise<Record<string, unknown>> {
+  const structuredSection = structured
+    ? `\n\nPATTERN ANALYSIS:\n${JSON.stringify(structured, null, 2).slice(0, 8000)}`
+    : "";
+  const mapsSection = Array.isArray(mapsResolved) && mapsResolved.length
+    ? `\n\nMAPS HINTS:\n${JSON.stringify(mapsResolved, null, 2).slice(0, 4000)}`
+    : "";
+
+  const systemPrompt = `You are APPENDING to an existing saved trip. The user may have only added text at the end of their Google Doc.
+
+RULES:
+- Output the SAME JSON schema as a full trip, but include ONLY **new** destinations, days, items, food spots, and activities that are NOT already represented.
+- We pass a machine fingerprint list of EXISTING rows — if a new line matches an existing title/name (same meaning), OMIT it.
+- If nothing is new, return {"title":null,"startDate":null,"endDate":null,"destinations":[]}.
+- Never output items solely to "refresh" old content.
+- For new content under an existing city, reuse the EXACT destination "name" string so we can merge.
+${appendHint}
+
+Respond with ONLY the JSON object. No thinking, no markdown.`;
+
+  const userPrompt = `EXISTING ROW KEYS (do not duplicate these):\n${existingFingerprintsBlock}\n\nTitle: ${title}\n${structuredSection}${mapsSection}\n\nTEXT TO PARSE (new or full doc context):\n${textContent.slice(0, 12000)}\n\nLinks: ${(links || []).slice(0, 40).join(", ")}\n\nREQUIRED JSON shape:\n{"title":"string or null","startDate":null,"endDate":null,"destinations":[{"name":"string","duration":null,"hotel":{},"days":[{"dayNumber":1,"date":null,"items":[]}],"foodSpots":[],"activities":[]}]}`;
+
+  const apiUrl = `${ANTHROPIC_BASE_URL}/v1/messages`;
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_AUTH_TOKEN,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 12000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+      temperature: 0.1,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`LLM API error: ${res.status} ${errText}`);
+  }
+
+  const data = await res.json();
+  const textBlock = data.content?.find((b: { type?: string }) => b.type === "text");
+  if (!textBlock?.text) throw new Error("No content in LLM response");
+
+  let raw = textBlock.text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  const json = extractJsonObject(raw);
+  if (!json) throw new Error("LLM response does not contain a valid JSON object");
+  return JSON.parse(json) as Record<string, unknown>;
+}
+
+async function getOrCreateDay(
+  supabase: ReturnType<typeof createClient>,
+  destinationId: string,
+  dayNumber: number,
+  date: string | null | undefined,
+): Promise<{ id: string }> {
+  const { data: existing } = await supabase
+    .from("day_itineraries")
+    .select("id")
+    .eq("destination_id", destinationId)
+    .eq("day_number", dayNumber)
+    .maybeSingle();
+  if (existing?.id) return { id: existing.id as string };
+  const { data: ins, error } = await supabase
+    .from("day_itineraries")
+    .insert({
+      destination_id: destinationId,
+      day_number: dayNumber,
+      date: date || null,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return { id: ins!.id as string };
+}
+
+async function appendTripJsonToDb(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  tripJson: Record<string, unknown>,
+  fp: Set<string>,
+): Promise<{ itinerary: number; food: number; activities: number; destinations: number }> {
+  const counts = { itinerary: 0, food: 0, activities: 0, destinations: 0 };
+  const { data: destRows } = await supabase
+    .from("destinations")
+    .select("id, name, sort_order")
+    .eq("trip_id", tripId)
+    .order("sort_order", { ascending: true });
+
+  const destByNorm = new Map<string, { id: string; sort_order: number }>();
+  for (const d of destRows || []) {
+    destByNorm.set(normKey(String(d.name ?? "")), {
+      id: d.id as string,
+      sort_order: Number(d.sort_order ?? 0),
+    });
+  }
+
+  const destinations = (tripJson.destinations as Record<string, unknown>[]) || [];
+
+  for (const dest of destinations) {
+    const name = String(dest.name ?? "").trim() || "Destination";
+    const nk = normKey(name);
+    let destId: string;
+    const found = destByNorm.get(nk);
+    if (found) {
+      destId = found.id;
+    } else {
+      const nextOrder = (destRows?.length ?? 0) + counts.destinations;
+      const { data: ins, error } = await supabase
+        .from("destinations")
+        .insert({
+          trip_id: tripId,
+          name,
+          duration: (dest.duration as string) || null,
+          hotel_name: (dest.hotel as { name?: string } | undefined)?.name || null,
+          hotel_address: (dest.hotel as { address?: string } | undefined)?.address || null,
+          hotel_link: (dest.hotel as { link?: string } | undefined)?.link || null,
+          sort_order: nextOrder,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      destId = ins!.id as string;
+      destByNorm.set(nk, { id: destId, sort_order: nextOrder });
+      counts.destinations++;
+    }
+
+    for (const food of (dest.foodSpots as Record<string, unknown>[]) || []) {
+      const fn = normKey(String(food.name ?? ""));
+      if (!fn) continue;
+      const key = `f:${destId}:${fn}`;
+      if (fp.has(key)) continue;
+      const { data: maxRow } = await supabase
+        .from("food_spots")
+        .select("sort_order")
+        .eq("destination_id", destId)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const sortOrder = (typeof maxRow?.sort_order === "number" ? maxRow.sort_order : -1) + 1;
+      await supabase.from("food_spots").insert({
+        destination_id: destId,
+        name: String(food.name ?? "Spot"),
+        type: (food.type as string) || "restaurant",
+        notes: (food.notes as string) || null,
+        link: (food.link as string) || null,
+        price_range: (food.priceRange as string) || null,
+        sort_order: sortOrder,
+      });
+      fp.add(key);
+      counts.food++;
+    }
+
+    for (const act of (dest.activities as Record<string, unknown>[]) || []) {
+      const an = normKey(String(act.name ?? ""));
+      if (!an) continue;
+      const key = `a:${destId}:${an}`;
+      if (fp.has(key)) continue;
+      const { data: maxRow } = await supabase
+        .from("activities")
+        .select("sort_order")
+        .eq("destination_id", destId)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const sortOrder = (typeof maxRow?.sort_order === "number" ? maxRow.sort_order : -1) + 1;
+      await supabase.from("activities").insert({
+        destination_id: destId,
+        name: String(act.name ?? "Activity"),
+        notes: (act.notes as string) || null,
+        cost: (act.cost as string) || null,
+        link: (act.link as string) || null,
+        location: (act.location as string) || null,
+        sort_order: sortOrder,
+      });
+      fp.add(key);
+      counts.activities++;
+    }
+
+    for (const day of (dest.days as Record<string, unknown>[]) || []) {
+      const dayNum = Number(day.dayNumber ?? 1);
+      const dayRow = await getOrCreateDay(supabase, destId, dayNum, (day.date as string) || null);
+      let { data: maxItem } = await supabase
+        .from("itinerary_items")
+        .select("sort_order")
+        .eq("day_id", dayRow.id)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let nextSort = (typeof maxItem?.sort_order === "number" ? maxItem.sort_order : -1);
+
+      for (const item of (day.items as Record<string, unknown>[]) || []) {
+        const tit = normKey(String(item.title ?? ""));
+        if (!tit) continue;
+        const key = `i:${destId}:${dayNum}:${tit}`;
+        if (fp.has(key)) continue;
+        nextSort += 1;
+        const costFields = parseCostFields(item.cost as string | undefined);
+        const timeMin = timeStringToMinutes(item.time as string | undefined);
+        await supabase.from("itinerary_items").insert({
+          day_id: dayRow.id,
+          time: (item.time as string) || null,
+          title: String(item.title ?? "Item"),
+          description: (item.description as string) || null,
+          category: (item.category as string) || "other",
+          location: (item.location as string) || null,
+          link: (item.link as string) || null,
+          cost: (item.cost as string) || null,
+          is_checked: Boolean(item.isChecked),
+          sort_order: nextSort,
+          cost_amount: costFields.cost_amount,
+          cost_unit: costFields.cost_unit,
+          time_minutes: timeMin,
+        });
+        fp.add(key);
+        counts.itinerary++;
+      }
+    }
+  }
+
+  return counts;
+}
+
+async function handleAppendResync(
+  supabase: ReturnType<typeof createClient>,
+  body: {
+    title: string;
+    textContent: string;
+    links: string[];
+    imageUrls?: string[];
+    docUrl: string;
+    userId: string;
+    tripId: string;
+    structured?: unknown;
+    mapsResolved?: unknown;
+  },
+): Promise<Response> {
+  const { title, textContent, links, imageUrls, docUrl, userId, tripId, structured, mapsResolved } = body;
+
+  const { data: trip, error: tripErr } = await supabase
+    .from("trips")
+    .select("id, owner_id, source_doc_url, raw_doc_text, raw_doc_content_hash, title")
+    .eq("id", tripId)
+    .single();
+
+  if (tripErr || !trip) {
+    return new Response(JSON.stringify({ error: "Trip not found" }), {
+      status: 404,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (trip.owner_id !== userId) {
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  if (!trip.source_doc_url || normalizeDocUrl(String(trip.source_doc_url)) !== normalizeDocUrl(docUrl)) {
+    return new Response(
+      JSON.stringify({ error: "Use the same Google Doc URL this trip was created from." }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const newHash = await sha256Hex(textContent);
+  if (trip.raw_doc_content_hash && newHash === trip.raw_doc_content_hash) {
+    const { data: slugRow } = await supabase.from("trips").select("share_slug").eq("id", tripId).single();
+    return new Response(
+      JSON.stringify({
+        skipped: true,
+        tripId,
+        reason: "document_unchanged",
+        shareSlug: slugRow?.share_slug ?? null,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const fp = await loadFingerprintSet(supabase, tripId);
+  const fpBlock = fingerprintSummaryForPrompt(fp, 500);
+  const prevRaw = String(trip.raw_doc_text ?? "");
+  let textForAI = textContent;
+  let appendHint = "";
+  if (prevRaw.length > 0 && textContent.startsWith(prevRaw)) {
+    const delta = textContent.slice(prevRaw.length);
+    if (delta.trim().length > 0) {
+      textForAI = delta;
+      appendHint =
+        "\nThe raw text below is ONLY the suffix appended after the previously-imported document — prioritize extracting from it.";
+    }
+  }
+
+  if (textForAI.trim().length < 2) {
+    await supabase
+      .from("trips")
+      .update({
+        raw_doc_text: textContent,
+        raw_doc_content_hash: newHash,
+        ...(imageUrls?.[0] ? { cover_image_url: imageUrls[0] } : {}),
+      })
+      .eq("id", tripId);
+    const { data: slugRow } = await supabase.from("trips").select("share_slug").eq("id", tripId).single();
+    return new Response(
+      JSON.stringify({
+        skipped: true,
+        tripId,
+        reason: "no_new_text",
+        shareSlug: slugRow?.share_slug ?? null,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const tripJson = await parseWithAIAppend(
+    title,
+    textForAI,
+    links || [],
+    structured,
+    mapsResolved,
+    fpBlock,
+    appendHint,
+  );
+
+  syncItineraryCategoriesToTables(tripJson, structured as Record<string, unknown> | undefined);
+  promoteStructuredFoodActivities(structured as Record<string, unknown> | undefined, tripJson);
+
+  if (!tripJson.title) tripJson.title = title;
+  for (const dest of (tripJson.destinations as Record<string, unknown>[]) || []) {
+    if (!dest.name) dest.name = title.replace(/trip/i, "").trim() || "Destination";
+    for (const day of (dest.days as Record<string, unknown>[]) || []) {
+      for (const item of (day.items as Record<string, unknown>[]) || []) {
+        if (!item.title) item.title = "Untitled item";
+      }
+    }
+    for (const spot of (dest.foodSpots as Record<string, unknown>[]) || []) {
+      if (!spot.name) spot.name = "Unnamed spot";
+    }
+    for (const act of (dest.activities as Record<string, unknown>[]) || []) {
+      if (!act.name) act.name = "Unnamed activity";
+    }
+  }
+
+  const appended = await appendTripJsonToDb(supabase, tripId, tripJson, fp);
+
+  const tripPatch: Record<string, unknown> = {
+    raw_doc_text: textContent,
+    raw_doc_content_hash: newHash,
+    title: (tripJson.title as string) || title,
+  };
+  if (tripJson.startDate) tripPatch.start_date = tripJson.startDate;
+  if (tripJson.endDate) tripPatch.end_date = tripJson.endDate;
+  if (imageUrls?.[0]) tripPatch.cover_image_url = imageUrls[0];
+  await supabase.from("trips").update(tripPatch).eq("id", tripId);
+
+  const { data: slugRow } = await supabase.from("trips").select("share_slug").eq("id", tripId).single();
+
+  return new Response(
+    JSON.stringify({
+      tripId,
+      shareSlug: slugRow?.share_slug ?? null,
+      skipped: false,
+      appended,
+    }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
 }

@@ -14,10 +14,13 @@ import {
   Link2,
   Copy,
   Check,
+  FileText,
+  RefreshCw,
 } from "lucide-react";
 import type { ItineraryItem, FoodSpot, Activity, TripPhase, TripMember } from "@pangofold/shared";
 import { CATEGORIES, FOOD_TYPES } from "@pangofold/shared";
 import { useTrip } from "../hooks/useTrip";
+import { useAuth } from "../hooks/useAuth";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
@@ -26,6 +29,7 @@ export function TripEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { trip: dbTrip, loading, error, refetch, updateTripMeta } = useTrip(id);
+  const { user } = useAuth();
 
   const useMock = !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
@@ -46,6 +50,83 @@ export function TripEdit() {
   const [coverInput, setCoverInput] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
   const coverFileRef = useRef<HTMLInputElement>(null);
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncMessage, setResyncMessage] = useState<string | null>(null);
+
+  const handleResyncDoc = useCallback(async () => {
+    if (!trip?.sourceDocUrl || useMock) return;
+    if (user?.id !== trip.ownerId) {
+      setResyncMessage("Only the trip owner can resync.");
+      return;
+    }
+    setResyncMessage(null);
+    setResyncing(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setResyncMessage("Sign in required.");
+        return;
+      }
+      const providerToken =
+        session.provider_token || sessionStorage.getItem("google_provider_token");
+      if (!providerToken) {
+        setResyncMessage("Google access expired. Sign out and sign in again.");
+        return;
+      }
+      const fetchRes = await supabase.functions.invoke("fetch-doc", {
+        body: { docUrl: trip.sourceDocUrl, providerToken },
+      });
+      if (fetchRes.error) {
+        throw new Error(
+          typeof fetchRes.error.message === "string" ? fetchRes.error.message : "Could not fetch doc",
+        );
+      }
+      const parseRes = await supabase.functions.invoke("parse-trip", {
+        body: {
+          ...(fetchRes.data as Record<string, unknown>),
+          userId: session.user.id,
+          mode: "append",
+          tripId: trip.id,
+        },
+      });
+      if (parseRes.error) {
+        throw new Error(
+          typeof parseRes.error.message === "string" ? parseRes.error.message : "Parse failed",
+        );
+      }
+      const d = parseRes.data as {
+        skipped?: boolean;
+        reason?: string;
+        appended?: {
+          itinerary?: number;
+          food?: number;
+          activities?: number;
+          destinations?: number;
+        };
+      };
+      if (d.skipped) {
+        setResyncMessage(
+          d.reason === "document_unchanged"
+            ? "Doc unchanged — nothing to add."
+            : "No new text to parse.",
+        );
+      } else {
+        const a = d.appended;
+        setResyncMessage(
+          `Added ${a?.itinerary ?? 0} itinerary · ${a?.food ?? 0} food · ${a?.activities ?? 0} activities` +
+            ((a?.destinations ?? 0) > 0 ? ` · ${a?.destinations} new destination(s)` : "") +
+            ".",
+        );
+      }
+      await refetch();
+    } catch (e) {
+      setResyncMessage(e instanceof Error ? e.message : "Resync failed.");
+    } finally {
+      setResyncing(false);
+    }
+  }, [trip?.sourceDocUrl, trip?.id, trip?.ownerId, user?.id, useMock, refetch]);
 
   useEffect(() => {
     if (trip?.coverImageUrl) setCoverInput(trip.coverImageUrl);
@@ -394,6 +475,32 @@ export function TripEdit() {
                 </button>
               </div>
             </div>
+
+            {trip.sourceDocUrl && (
+              <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  Google Doc
+                </h2>
+                <p className="text-xs text-text-muted">
+                  Pull the latest text from your linked doc and <strong>append</strong> new stops to this trip. Nothing
+                  is deleted — duplicates are skipped using a fingerprint set (and the model is told what already
+                  exists). If the file is unchanged, the LLM is skipped entirely.
+                </p>
+                <button
+                  type="button"
+                  disabled={resyncing || user?.id !== trip.ownerId}
+                  onClick={() => void handleResyncDoc()}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw className={`w-4 h-4 ${resyncing ? "animate-spin" : ""}`} />
+                  {resyncing ? "Resyncing…" : "Resync from Google Doc"}
+                </button>
+                {resyncMessage && (
+                  <p className="text-xs text-text-muted whitespace-pre-wrap">{resyncMessage}</p>
+                )}
+              </div>
+            )}
 
             <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
               <h2 className="text-sm font-semibold flex items-center gap-2">

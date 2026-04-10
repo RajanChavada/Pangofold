@@ -13,7 +13,6 @@ import { FoodCard } from "../components/FoodCard";
 import { ActivityCard } from "../components/ActivityCard";
 import { HotelCard } from "../components/HotelCard";
 import { SectionHeader } from "../components/SectionHeader";
-import { PhaseBanner } from "../components/PhaseBanner";
 import { JournalModal } from "../components/JournalModal";
 import { CollabJoinModal } from "../components/CollabJoinModal";
 import { cn } from "../lib/cn";
@@ -51,7 +50,7 @@ export function TripView() {
   const isCollab = Boolean(collabMatch);
   const tokenFromUrl = searchParams.get("token")?.trim() ?? "";
 
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { trip: dbTrip, loading, error, toggleItemChecked, refetch, updateTripMeta } = useTrip(id);
   const { entries, createEntry, refetch: refetchJournal } = useJournal(id);
 
@@ -68,22 +67,40 @@ export function TripView() {
   const [gate, setGate] = useState<"checking" | "bad" | "ok">(() => (isCollab ? "checking" : "ok"));
   const [guestOverride, setGuestOverride] = useState<string | null>(null);
 
+  const [collabVerifyError, setCollabVerifyError] = useState<string | null>(null);
+  const [journalActionError, setJournalActionError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isCollab) {
       setGate("ok");
+      setCollabVerifyError(null);
       return;
     }
     if (!id) return;
     if (!tokenFromUrl) {
       setGate("bad");
+      setCollabVerifyError("Add ?token=… from the link your friend shared (Trip → Edit → Friend logging link).");
       return;
     }
     setGate("checking");
+    setCollabVerifyError(null);
     void supabase
       .rpc("verify_trip_collab_token", { p_trip_id: id, p_token: tokenFromUrl })
       .then(({ data, error: rpcErr }) => {
-        if (rpcErr) setGate("bad");
-        else setGate(data ? "ok" : "bad");
+        if (rpcErr) {
+          setGate("bad");
+          setCollabVerifyError(
+            rpcErr.message ||
+              "Could not verify the link. Apply migration 004 to your Supabase project (function verify_trip_collab_token).",
+          );
+          return;
+        }
+        setGate(data ? "ok" : "bad");
+        if (!data) {
+          setCollabVerifyError(
+            "Token doesn’t match this trip, or friend logging is turned off. Ask the owner to re-copy the link from Trip → Edit.",
+          );
+        }
       });
   }, [isCollab, id, tokenFromUrl]);
 
@@ -163,10 +180,15 @@ export function TripView() {
   }, [dbTrip, useMock, refetch]);
 
   const handleFinishTrip = useCallback(async () => {
-    if (!trip?.id) return;
+    if (!id) return;
     await updateTripMeta({ phase: "completed" });
-    navigate(`/trip/${trip.id}/report`);
-  }, [trip?.id, navigate, updateTripMeta]);
+    navigate(`/trip/${id}/report`);
+  }, [id, navigate, updateTripMeta]);
+
+  const handleReopenTrip = useCallback(async () => {
+    if (!id) return;
+    await updateTripMeta({ phase: "active" });
+  }, [id, updateTripMeta]);
 
   const leaderboard = useMemo(() => {
     const m = new Map<string, number>();
@@ -187,9 +209,16 @@ export function TripView() {
 
   if (isCollab && gate === "bad") {
     return (
-      <div className="min-h-dvh flex flex-col items-center justify-center px-4 gap-3">
-        <p className="text-red-600 text-center">This collaboration link is invalid or no longer active.</p>
-        <p className="text-sm text-text-muted text-center">Ask the trip owner for a new link.</p>
+      <div className="min-h-dvh flex flex-col items-center justify-center px-4 gap-3 max-w-md mx-auto">
+        <p className="text-red-600 text-center font-medium">This collaboration link isn’t valid.</p>
+        {collabVerifyError && (
+          <p className="text-sm text-text-muted text-center">{collabVerifyError}</p>
+        )}
+        <p className="text-sm text-text-muted text-center">
+          The logging URL looks like{" "}
+          <code className="text-xs bg-surface-muted px-1 rounded">/trip/TRIP_ID/collab?token=…</code> — not the public
+          read-only <code className="text-xs bg-surface-muted px-1 rounded">/s/slug</code> page.
+        </p>
       </div>
     );
   }
@@ -214,6 +243,12 @@ export function TripView() {
   }
 
   if (!trip) return null;
+
+  const isOwner = Boolean(user?.id && trip.ownerId === user.id);
+  const showFinishTripCta =
+    !useMock && !isCollab && isOwner && trip.phase !== "completed" && !authLoading;
+  const showReopenTripCta =
+    !useMock && !isCollab && isOwner && trip.phase === "completed" && !authLoading;
 
   const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
@@ -259,42 +294,49 @@ export function TripView() {
         capturedByLabel={capturedByLabel}
         rosterNames={rosterNames}
         onSubmit={async (data) => {
-          if (isCollab && id && tokenFromUrl && guestName) {
-            const photos = await filesToGuestPhotos(data.files);
-            const { error: fnErr } = await supabase.functions.invoke("guest-journal-submit", {
-              body: {
-                tripId: id,
-                collaborateToken: tokenFromUrl,
-                loggedByName: guestName,
-                title: data.title,
-                note: data.note,
-                rating: data.rating,
-                amountCents: data.amountCents,
-                currency: "USD",
-                category: data.category,
-                splitBetween: data.splitBetween,
-                splitMode: data.splitMode,
-                paidByName: data.paidByName,
-                itineraryItemId: journalItemId,
-                photos,
-              },
+          setJournalActionError(null);
+          try {
+            if (isCollab && id && tokenFromUrl && guestName) {
+              const photos = await filesToGuestPhotos(data.files);
+              const { error: fnErr } = await supabase.functions.invoke("guest-journal-submit", {
+                body: {
+                  tripId: id,
+                  collaborateToken: tokenFromUrl,
+                  loggedByName: guestName,
+                  title: data.title,
+                  note: data.note,
+                  rating: data.rating,
+                  amountCents: data.amountCents,
+                  currency: "USD",
+                  category: data.category,
+                  splitBetween: data.splitBetween,
+                  splitMode: data.splitMode,
+                  paidByName: data.paidByName,
+                  itineraryItemId: journalItemId,
+                  photos,
+                },
+              });
+              if (fnErr) throw new Error(fnErr.message);
+              await refetchJournal();
+              return;
+            }
+            await createEntry({
+              itineraryItemId: journalItemId,
+              title: data.title,
+              note: data.note,
+              rating: data.rating,
+              amountCents: data.amountCents,
+              category: data.category ?? undefined,
+              splitBetween: data.splitBetween,
+              splitMode: data.splitMode,
+              paidByName: data.paidByName,
+              files: data.files,
             });
-            if (fnErr) throw new Error(fnErr.message);
-            await refetchJournal();
-            return;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Could not save log";
+            setJournalActionError(msg);
+            throw err;
           }
-          await createEntry({
-            itineraryItemId: journalItemId,
-            title: data.title,
-            note: data.note,
-            rating: data.rating,
-            amountCents: data.amountCents,
-            category: data.category ?? undefined,
-            splitBetween: data.splitBetween,
-            splitMode: data.splitMode,
-            paidByName: data.paidByName,
-            files: data.files,
-          });
         }}
       />
 
@@ -302,10 +344,17 @@ export function TripView() {
         <TripHeader
           trip={trip}
           editable={!useMock && !isCollab}
-          onFinishTrip={!useMock && !isCollab ? () => void handleFinishTrip() : undefined}
+          showPhaseBanner={!useMock && !isCollab}
+          onFinishTrip={showFinishTripCta ? () => void handleFinishTrip() : undefined}
+          onReopenTrip={showReopenTripCta ? () => void handleReopenTrip() : undefined}
         />
 
-        {!useMock && !isCollab && <PhaseBanner trip={trip} />}
+        {!useMock && !isCollab && !authLoading && !user && (
+          <div className="px-5 mb-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-sm py-3">
+            <strong>Sign in</strong> with the account that owns this trip to edit items, finish the trip, and open the
+            full report.
+          </div>
+        )}
 
         {!useMock && !isCollab && (
           <div className="px-5 mb-3 flex flex-wrap gap-2">
@@ -341,6 +390,12 @@ export function TripView() {
               <MapPin className="w-4 h-4" />
               Log something new
             </button>
+          </div>
+        )}
+
+        {journalActionError && (
+          <div className="px-5 mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl py-2 px-3">
+            {journalActionError}
           </div>
         )}
 
