@@ -1,8 +1,9 @@
 import type { Trip } from "@pangofold/shared";
-import { MapPin, Calendar, Share2, ArrowLeft, Pencil, Check } from "lucide-react";
+import { MapPin, Calendar, Share2, ArrowLeft, Pencil, Check, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { cn } from "../lib/cn";
+import { supabase } from "../lib/supabase";
 
 interface TripHeaderProps {
   trip: Trip;
@@ -22,6 +23,7 @@ function formatDateRange(start: string, end: string): string {
 export function TripHeader({ trip, editable = false }: TripHeaderProps) {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const shareUrl = `${window.location.origin}/s/${trip.shareSlug}`;
 
@@ -32,6 +34,17 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // fallback
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete "${trip.title}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    const { error } = await supabase.from("trips").delete().eq("id", trip.id);
+    if (!error) {
+      navigate("/dashboard");
+    } else {
+      setDeleting(false);
     }
   };
 
@@ -75,6 +88,15 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
             >
               {copied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
             </button>
+            {editable && (
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="p-2 rounded-xl hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 

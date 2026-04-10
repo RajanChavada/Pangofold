@@ -12,6 +12,7 @@ import {
   Check,
   ArrowRight,
   Plane,
+  Trash2,
 } from "lucide-react";
 
 interface TripSummary {
@@ -32,6 +33,7 @@ export function Dashboard() {
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -60,6 +62,15 @@ export function Dashboard() {
     navigator.clipboard.writeText(url);
     setCopiedSlug(slug);
     setTimeout(() => setCopiedSlug(null), 2000);
+  };
+
+  const deleteTrip = async (id: string) => {
+    setDeletingId(id);
+    const { error } = await supabase.from("trips").delete().eq("id", id);
+    if (!error) {
+      setTrips((prev) => prev.filter((t) => t.id !== id));
+    }
+    setDeletingId(null);
   };
 
   if (authLoading) {
@@ -206,6 +217,17 @@ export function Dashboard() {
                   >
                     <Copy className="w-3.5 h-3.5" />
                     Share
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete "${trip.title}"? This cannot be undone.`)) {
+                        deleteTrip(trip.id);
+                      }
+                    }}
+                    disabled={deletingId === trip.id}
+                    className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-red-500 text-sm font-medium hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
