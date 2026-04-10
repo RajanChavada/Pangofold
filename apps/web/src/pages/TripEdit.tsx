@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useParams, useNavigate } from "react-router";
 import {
@@ -10,6 +10,10 @@ import {
   Compass,
   MapPin,
   Eye,
+  Image as ImageIcon,
+  Link2,
+  Copy,
+  Check,
 } from "lucide-react";
 import type { ItineraryItem, FoodSpot, Activity, TripPhase, TripMember } from "@pangofold/shared";
 import { CATEGORIES, FOOD_TYPES } from "@pangofold/shared";
@@ -37,6 +41,25 @@ export function TripEdit() {
   const [memberUid, setMemberUid] = useState("");
   const [members, setMembers] = useState<TripMember[]>([]);
   const [memberSaving, setMemberSaving] = useState(false);
+  const [collabEnabled, setCollabEnabled] = useState(false);
+  const [collabToken, setCollabToken] = useState<string | null>(null);
+  const [coverInput, setCoverInput] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
+  const coverFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (trip?.coverImageUrl) setCoverInput(trip.coverImageUrl);
+  }, [trip?.coverImageUrl]);
+
+  useEffect(() => {
+    if (!id || useMock) return;
+    void supabase.rpc("trip_collab_settings_for_owner", { p_trip_id: id }).then(({ data, error: rpcErr }) => {
+      if (rpcErr || !data?.length) return;
+      const row = data[0] as { collaboration_enabled: boolean; collaborate_token: string | null };
+      setCollabEnabled(row.collaboration_enabled);
+      setCollabToken(row.collaborate_token);
+    });
+  }, [id, useMock]);
 
   useEffect(() => {
     if (!id || useMock) return;
@@ -127,6 +150,54 @@ export function TripEdit() {
     } finally {
       setMemberSaving(false);
     }
+  };
+
+  const setCollabToggle = async (on: boolean) => {
+    if (!trip || useMock) return;
+    if (on) {
+      const token = collabToken || crypto.randomUUID().replace(/-/g, "");
+      const { error: uErr } = await supabase
+        .from("trips")
+        .update({ collaboration_enabled: true, collaborate_token: token })
+        .eq("id", trip.id);
+      if (!uErr) {
+        setCollabEnabled(true);
+        setCollabToken(token);
+      }
+    } else {
+      const { error: uErr } = await supabase
+        .from("trips")
+        .update({ collaboration_enabled: false })
+        .eq("id", trip.id);
+      if (!uErr) setCollabEnabled(false);
+    }
+  };
+
+  const copyCollabLink = async () => {
+    if (!trip || !collabToken) return;
+    const url = `${window.location.origin}/trip/${trip.id}/collab?token=${collabToken}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveCoverUrl = async () => {
+    await updateTripMeta({ coverImageUrl: coverInput.trim() || null });
+  };
+
+  const uploadCoverFile = async (file: File) => {
+    if (!trip || useMock) return;
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `${trip.id}/${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from("trip-covers").upload(path, file);
+    if (upErr) return;
+    const { data } = supabase.storage.from("trip-covers").getPublicUrl(path);
+    await updateTripMeta({ coverImageUrl: data.publicUrl });
+    setCoverInput(data.publicUrl);
   };
 
   const dest = trip.destinations[destIndex];
@@ -279,6 +350,84 @@ export function TripEdit() {
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <ImageIcon className="w-4 h-4" />
+                Cover image
+              </h2>
+              <p className="text-xs text-text-muted">
+                Paste an image URL or upload to the trip-covers bucket (shown on the trip page).
+              </p>
+              <input
+                value={coverInput}
+                onChange={(e) => setCoverInput(e.target.value)}
+                placeholder="https://…"
+                className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveCoverUrl()}
+                  className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-medium cursor-pointer"
+                >
+                  Save URL
+                </button>
+                <input
+                  ref={coverFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadCoverFile(f);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => coverFileRef.current?.click()}
+                  className="px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer"
+                >
+                  Upload file
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Link2 className="w-4 h-4" />
+                Friend logging link
+              </h2>
+              <p className="text-xs text-text-muted">
+                Anyone with the link can read this trip and add journal entries (no Pangofold account). Keep the link
+                private.
+              </p>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={collabEnabled}
+                  onChange={(e) => void setCollabToggle(e.target.checked)}
+                  className="rounded border-border"
+                />
+                Allow friends to log via link
+              </label>
+              {collabEnabled && collabToken && (
+                <div className="flex items-start gap-2">
+                  <p className="text-[11px] font-mono break-all flex-1 bg-surface-muted rounded-lg px-2 py-1.5">
+                    {`${window.location.origin}/trip/${trip.id}/collab?token=${collabToken}`}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void copyCollabLink()}
+                    className="p-2 rounded-xl border border-border hover:bg-surface-muted shrink-0 cursor-pointer"
+                    title="Copy link"
+                  >
+                    {linkCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">

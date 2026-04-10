@@ -14,6 +14,7 @@ export function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/trip/:id" element={<TripView />} />
+        <Route path="/trip/:id/collab" element={<TripView />} />
         <Route path="/trip/:id/edit" element={<TripEdit />} />
         <Route path="/trip/:id/report" element={<TripReport />} />
         <Route path="/s/:slug" element={<SharedView />} />

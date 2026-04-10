@@ -1,8 +1,10 @@
-import { useState, useCallback } from "react";
-import { useParams } from "react-router";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { useParams, useMatch, useSearchParams, useNavigate } from "react-router";
 import { Utensils, Compass, ListChecks, List, MapPin, Sparkles } from "lucide-react";
 import { useTrip, useScheduleConflicts } from "../hooks/useTrip";
 import { useJournal } from "../hooks/useJournal";
+import { useAuth } from "../hooks/useAuth";
+import { getGuestName, setGuestName } from "../hooks/useGuestIdentity";
 import { TripHeader } from "../components/TripHeader";
 import { DestinationTabs } from "../components/DestinationTabs";
 import { DayTabs } from "../components/DayTabs";
@@ -13,16 +15,45 @@ import { HotelCard } from "../components/HotelCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { PhaseBanner } from "../components/PhaseBanner";
 import { JournalModal } from "../components/JournalModal";
+import { CollabJoinModal } from "../components/CollabJoinModal";
 import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
 import { supabase } from "../lib/supabase";
+import { personDisplayKey } from "../lib/trip-report";
 
 type ViewTab = "itinerary" | "food" | "activities";
 
+async function filesToGuestPhotos(
+  files: File[],
+): Promise<Array<{ filename: string; base64: string }>> {
+  const out: Array<{ filename: string; base64: string }> = [];
+  for (const f of files) {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const d = r.result as string;
+        const i = d.indexOf(",");
+        resolve(i >= 0 ? d.slice(i + 1) : d);
+      };
+      r.onerror = () => reject(new Error("Failed to read file"));
+      r.readAsDataURL(f);
+    });
+    out.push({ filename: f.name || "photo.jpg", base64 });
+  }
+  return out;
+}
+
 export function TripView() {
   const { id } = useParams();
-  const { trip: dbTrip, loading, error, toggleItemChecked, refetch } = useTrip(id);
-  const { entries, createEntry } = useJournal(id);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const collabMatch = useMatch({ path: "/trip/:id/collab", end: true });
+  const isCollab = Boolean(collabMatch);
+  const tokenFromUrl = searchParams.get("token")?.trim() ?? "";
+
+  const { user } = useAuth();
+  const { trip: dbTrip, loading, error, toggleItemChecked, refetch, updateTripMeta } = useTrip(id);
+  const { entries, createEntry, refetch: refetchJournal } = useJournal(id);
 
   const [destIndex, setDestIndex] = useState(0);
   const [dayIndex, setDayIndex] = useState(0);
@@ -34,7 +65,33 @@ export function TripView() {
   const [enriching, setEnriching] = useState(false);
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
-  const useMock = !dbTrip && !loading;
+  const [gate, setGate] = useState<"checking" | "bad" | "ok">(() => (isCollab ? "checking" : "ok"));
+  const [guestOverride, setGuestOverride] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCollab) {
+      setGate("ok");
+      return;
+    }
+    if (!id) return;
+    if (!tokenFromUrl) {
+      setGate("bad");
+      return;
+    }
+    setGate("checking");
+    void supabase
+      .rpc("verify_trip_collab_token", { p_trip_id: id, p_token: tokenFromUrl })
+      .then(({ data, error: rpcErr }) => {
+        if (rpcErr) setGate("bad");
+        else setGate(data ? "ok" : "bad");
+      });
+  }, [isCollab, id, tokenFromUrl]);
+
+  const storedGuestName = id ? getGuestName(id) : null;
+  const guestName = guestOverride ?? storedGuestName;
+  const showJoinModal = isCollab && gate === "ok" && !guestName;
+
+  const useMock = !isCollab && !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
   const destForHooks = trip?.destinations[destIndex];
   const dayForHooks = destForHooks?.days[dayIndex];
@@ -45,6 +102,20 @@ export function TripView() {
     setJournalDefaultTitle(defaultTitle);
     setJournalOpen(true);
   }, []);
+
+  const rosterNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const e of entries) {
+      s.add(personDisplayKey(e));
+    }
+    if (user?.email) s.add(user.email.split("@")[0] ?? "");
+    if (guestName) s.add(guestName);
+    return [...s].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [entries, user?.email, guestName]);
+
+  const capturedByLabel = isCollab
+    ? guestName || "—"
+    : user?.email?.split("@")[0] || user?.email || "Signed in";
 
   const handleEnrich = useCallback(async () => {
     if (!dbTrip || useMock) return;
@@ -67,20 +138,46 @@ export function TripView() {
         return;
       }
       await refetch();
-      const n = data && typeof data === "object" && "enriched" in data ? Number((data as { enriched: unknown }).enriched) : NaN;
-      setEnrichMessage(
-        Number.isFinite(n)
-          ? n > 0
-            ? `Linked ${n} place${n === 1 ? "" : "s"} from Google.`
-            : "No new places to link (already enriched or short names)."
-          : "Enrichment finished.",
-      );
+      const d =
+        data && typeof data === "object"
+          ? (data as { enriched?: unknown; alreadyLinked?: unknown; lookupFailed?: unknown })
+          : null;
+      const n = Number(d?.enriched);
+      const already = Number(d?.alreadyLinked);
+      const failed = Number(d?.lookupFailed);
+
+      if (Number.isFinite(n) && n > 0) {
+        setEnrichMessage(`Linked ${n} new place${n === 1 ? "" : "s"} from Google.`);
+      } else if (Number.isFinite(failed) && failed > 0) {
+        setEnrichMessage(
+          `Google had no confident match for ${failed} stop${failed === 1 ? "" : "s"}. Add a specific address or venue name in your doc, then re-import or edit items.`,
+        );
+      } else if (Number.isFinite(already) && already > 0 && failed === 0) {
+        setEnrichMessage("Every stop already has a place link — nothing new to add.");
+      } else {
+        setEnrichMessage("Enrichment finished — no items needed linking.");
+      }
     } finally {
       setEnriching(false);
     }
   }, [dbTrip, useMock, refetch]);
 
-  if (loading) {
+  const handleFinishTrip = useCallback(async () => {
+    if (!trip?.id) return;
+    await updateTripMeta({ phase: "completed" });
+    navigate(`/trip/${trip.id}/report`);
+  }, [trip?.id, navigate, updateTripMeta]);
+
+  const leaderboard = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of entries) {
+      const k = personDisplayKey(e);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [entries]);
+
+  if (loading || (isCollab && gate === "checking")) {
     return (
       <div className="min-h-dvh flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -88,13 +185,30 @@ export function TripView() {
     );
   }
 
-  if (error && !trip) {
+  if (isCollab && gate === "bad") {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center px-4 gap-3">
+        <p className="text-red-600 text-center">This collaboration link is invalid or no longer active.</p>
+        <p className="text-sm text-text-muted text-center">Ask the trip owner for a new link.</p>
+      </div>
+    );
+  }
+
+  if (error && !trip && !isCollab) {
     return (
       <div className="min-h-dvh flex items-center justify-center px-4">
         <div className="text-center">
           <p className="text-red-600 mb-2">{error}</p>
           <p className="text-text-muted text-sm">Using demo data instead.</p>
         </div>
+      </div>
+    );
+  }
+
+  if (isCollab && error && !trip) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center px-4">
+        <p className="text-red-600">{error}</p>
       </div>
     );
   }
@@ -121,17 +235,54 @@ export function TripView() {
   ];
 
   const split = trip.defaultSplitCount ?? 1;
+  const canJournal = !isCollab || Boolean(guestName && tokenFromUrl);
+  const readOnlyTrip = isCollab;
 
   return (
     <div className="min-h-dvh bg-surface pb-8">
+      <CollabJoinModal
+        open={showJoinModal}
+        tripTitle={trip.title}
+        onSave={(name) => {
+          if (id) setGuestName(id, name);
+          setGuestOverride(name);
+        }}
+      />
+
       <JournalModal
-        key={journalItemId ?? "new"}
+        key={`${journalItemId ?? "new"}-${isCollab ? "g" : "m"}`}
         open={journalOpen}
         onClose={() => setJournalOpen(false)}
         title={journalItemId ? "Log this stop" : "Log something new"}
         defaultTitle={journalDefaultTitle}
         defaultSplitCount={split}
+        capturedByLabel={capturedByLabel}
+        rosterNames={rosterNames}
         onSubmit={async (data) => {
+          if (isCollab && id && tokenFromUrl && guestName) {
+            const photos = await filesToGuestPhotos(data.files);
+            const { error: fnErr } = await supabase.functions.invoke("guest-journal-submit", {
+              body: {
+                tripId: id,
+                collaborateToken: tokenFromUrl,
+                loggedByName: guestName,
+                title: data.title,
+                note: data.note,
+                rating: data.rating,
+                amountCents: data.amountCents,
+                currency: "USD",
+                category: data.category,
+                splitBetween: data.splitBetween,
+                splitMode: data.splitMode,
+                paidByName: data.paidByName,
+                itineraryItemId: journalItemId,
+                photos,
+              },
+            });
+            if (fnErr) throw new Error(fnErr.message);
+            await refetchJournal();
+            return;
+          }
           await createEntry({
             itineraryItemId: journalItemId,
             title: data.title,
@@ -140,17 +291,23 @@ export function TripView() {
             amountCents: data.amountCents,
             category: data.category ?? undefined,
             splitBetween: data.splitBetween,
+            splitMode: data.splitMode,
+            paidByName: data.paidByName,
             files: data.files,
           });
         }}
       />
 
       <div className="max-w-lg mx-auto">
-        <TripHeader trip={trip} editable={!useMock} />
+        <TripHeader
+          trip={trip}
+          editable={!useMock && !isCollab}
+          onFinishTrip={!useMock && !isCollab ? () => void handleFinishTrip() : undefined}
+        />
 
-        {!useMock && <PhaseBanner trip={trip} />}
+        {!useMock && !isCollab && <PhaseBanner trip={trip} />}
 
-        {!useMock && (
+        {!useMock && !isCollab && (
           <div className="px-5 mb-3 flex flex-wrap gap-2">
             <div className="flex flex-col gap-2">
               <button
@@ -180,6 +337,24 @@ export function TripView() {
               type="button"
               onClick={() => openLog(null, "New memory")}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer"
+            >
+              <MapPin className="w-4 h-4" />
+              Log something new
+            </button>
+          </div>
+        )}
+
+        {isCollab && gate === "ok" && (
+          <div className="px-5 mb-3">
+            <p className="text-xs text-text-muted mb-2 rounded-xl bg-primary/5 border border-primary/10 px-3 py-2">
+              You’re logging as <strong>{guestName ?? "…"}</strong> — memories save to this trip for everyone on the
+              link.
+            </p>
+            <button
+              type="button"
+              disabled={!canJournal}
+              onClick={() => openLog(null, "New memory")}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer disabled:opacity-50"
             >
               <MapPin className="w-4 h-4" />
               Log something new
@@ -269,8 +444,10 @@ export function TripView() {
                   key={item.id}
                   item={item}
                   checklistMode={checklistMode}
-                  onToggleChecked={useMock ? undefined : toggleItemChecked}
-                  onLogThis={useMock ? undefined : (itemId) => openLog(itemId, item.title)}
+                  onToggleChecked={useMock || readOnlyTrip ? undefined : toggleItemChecked}
+                  onLogThis={
+                    useMock || !canJournal ? undefined : (itemId) => openLog(itemId, item.title)
+                  }
                   scheduleConflict={conflictIds.has(item.id)}
                 />
               ))}
@@ -323,6 +500,22 @@ export function TripView() {
           </div>
         )}
 
+        {!useMock && leaderboard.length > 0 && (
+          <div className="px-5 mt-6">
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2">Who’s logging</p>
+            <div className="flex flex-wrap gap-2">
+              {leaderboard.slice(0, 6).map(([name, count]) => (
+                <span
+                  key={name}
+                  className="text-xs px-2.5 py-1 rounded-full bg-surface-muted border border-border"
+                >
+                  {name} · {count}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!useMock && entries.length > 0 && (
           <div className="px-5 mt-8">
             <SectionHeader
@@ -334,11 +527,17 @@ export function TripView() {
               {entries.slice(0, 8).map((e) => (
                 <div key={e.id} className="bg-surface-card rounded-2xl border border-border p-4 text-sm">
                   <div className="font-semibold">{e.title}</div>
+                  <p className="text-[11px] text-text-muted mt-0.5">{personDisplayKey(e)}</p>
                   {e.note && <p className="text-text-muted mt-1">{e.note}</p>}
                   <div className="flex flex-wrap gap-2 mt-2 text-xs text-text-muted">
                     {e.rating != null && <span>{e.rating}/5</span>}
                     {e.amountCents != null && (
-                      <span>{(e.amountCents / 100).toLocaleString("en-US", { style: "currency", currency: e.currency })}</span>
+                      <span>
+                        {(e.amountCents / 100).toLocaleString("en-US", {
+                          style: "currency",
+                          currency: e.currency,
+                        })}
+                      </span>
                     )}
                     {e.category && <span className="capitalize">{e.category}</span>}
                   </div>
@@ -346,7 +545,12 @@ export function TripView() {
                     <div className="flex gap-2 mt-2 overflow-x-auto">
                       {e.photos.map((p: { id: string; publicUrl?: string | null }) =>
                         p.publicUrl ? (
-                          <img key={p.id} src={p.publicUrl} alt="" className="h-16 w-16 rounded-lg object-cover shrink-0" />
+                          <img
+                            key={p.id}
+                            src={p.publicUrl}
+                            alt=""
+                            className="h-16 w-16 rounded-lg object-cover shrink-0"
+                          />
                         ) : null,
                       )}
                     </div>

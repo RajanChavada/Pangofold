@@ -1,5 +1,15 @@
 import type { Trip } from "@pangofold/shared";
-import { MapPin, Calendar, Share2, ArrowLeft, Pencil, Check, Trash2, BarChart3 } from "lucide-react";
+import {
+  MapPin,
+  Calendar,
+  Share2,
+  ArrowLeft,
+  Pencil,
+  Check,
+  Trash2,
+  BarChart3,
+  PartyPopper,
+} from "lucide-react";
 import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { cn } from "../lib/cn";
@@ -9,6 +19,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 interface TripHeaderProps {
   trip: Trip;
   editable?: boolean;
+  /** Marks the trip complete and navigates to the Wrapped report (owner view). */
+  onFinishTrip?: () => void;
 }
 
 function formatDateRange(start: string, end: string): string {
@@ -21,7 +33,7 @@ function formatDateRange(start: string, end: string): string {
   return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}, ${s.getFullYear()}`;
 }
 
-export function TripHeader({ trip, editable = false }: TripHeaderProps) {
+export function TripHeader({ trip, editable = false, onFinishTrip }: TripHeaderProps) {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -94,6 +106,16 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
               >
                 <BarChart3 className="w-4 h-4" />
               </Link>
+            )}
+            {editable && onFinishTrip && trip.phase !== "completed" && (
+              <button
+                type="button"
+                onClick={onFinishTrip}
+                className="p-2 rounded-xl hover:bg-amber-50 text-amber-700 transition-colors"
+                title="Finish trip & view Wrapped"
+              >
+                <PartyPopper className="w-4 h-4" />
+              </button>
             )}
             {editable && (
               <Link

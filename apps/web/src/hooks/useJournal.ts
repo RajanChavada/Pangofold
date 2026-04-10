@@ -1,5 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
-import type { JournalEntry, JournalPhoto, JournalSpendingCategory } from "@pangofold/shared";
+import type {
+  JournalEntry,
+  JournalPhoto,
+  JournalSpendingCategory,
+  JournalSplitMode,
+} from "@pangofold/shared";
 import { supabase } from "../lib/supabase";
 
 function snakeToCamel<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
@@ -104,6 +109,9 @@ export function useJournal(tripId: string | undefined) {
       currency?: string;
       category?: JournalSpendingCategory | null;
       splitBetween?: number;
+      splitMode?: JournalSplitMode;
+      loggedByName?: string;
+      paidByName?: string | null;
       lat?: number | null;
       lng?: number | null;
       files?: File[];
@@ -114,12 +122,20 @@ export function useJournal(tripId: string | undefined) {
       if (!user || !tripId) throw new Error("Not signed in");
 
       const split = input.splitBetween ?? 1;
+      const mode: JournalSplitMode = input.splitMode ?? "equal";
+      const display =
+        input.loggedByName?.trim() ||
+        (user.email?.split("@")[0] ?? "").trim() ||
+        "Traveler";
 
       const { data: inserted, error: insErr } = await supabase
         .from("journal_entries")
         .insert({
           trip_id: tripId,
           author_id: user.id,
+          logged_by_name: display.slice(0, 120),
+          paid_by_name: input.paidByName?.trim()?.slice(0, 120) ?? null,
+          split_mode: mode,
           itinerary_item_id: input.itineraryItemId ?? null,
           title: input.title,
           note: input.note ?? null,

@@ -13,6 +13,9 @@ export interface Trip {
   createdAt: string;
   phase?: TripPhase;
   defaultSplitCount?: number;
+  /** Present when loaded via owner-only RPC; omitted from public trip fetches. */
+  collaborationEnabled?: boolean;
+  collaborateToken?: string | null;
   destinations: Destination[];
 }
 
@@ -112,10 +115,16 @@ export interface JournalPhoto {
   publicUrl?: string | null;
 }
 
+export type JournalSplitMode = "equal" | "full_amount" | "group_split";
+
 export interface JournalEntry {
   id: string;
   tripId: string;
-  authorId: string;
+  authorId: string | null;
+  /** Display name for this log; required when authorId is null (guest). */
+  loggedByName?: string | null;
+  paidByName?: string | null;
+  splitMode?: JournalSplitMode;
   itineraryItemId?: string | null;
   placeId?: string | null;
   title: string;
@@ -143,6 +152,17 @@ export interface TripMember {
   createdAt: string;
 }
 
+export interface PersonTripStats {
+  name: string;
+  /** Sum of per-person shares (equal split divides amount by split_between). */
+  attributedSpendCents: number;
+  logCount: number;
+  photoCount: number;
+  foodLogCount: number;
+}
+
+export type SuperlativeId = "foodie" | "highRoller" | "historian" | "navigator";
+
 export interface TripReportPayload {
   generatedAt: string;
   spendByCategory: Record<JournalSpendingCategory | "uncategorized", number>;
@@ -151,4 +171,8 @@ export interface TripReportPayload {
   mostExpensiveDay: { date: string; cents: number } | null;
   unvisitedItems: { id: string; title: string }[];
   topPhotoPaths: string[];
+  /** Per-person aggregates for Wrapped-style views. */
+  perPerson: PersonTripStats[];
+  /** Derived titles; values are display names or null if no data / tie to empty. */
+  superlatives: Record<SuperlativeId, string | null>;
 }

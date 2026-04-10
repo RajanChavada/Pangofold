@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { JournalSpendingCategory } from "@pangofold/shared";
+import { useState, useMemo } from "react";
+import type { JournalSpendingCategory, JournalSplitMode } from "@pangofold/shared";
 import { X, Camera } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -11,21 +11,37 @@ const CATEGORIES: { value: JournalSpendingCategory; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
+const SPLIT_MODES: { value: JournalSplitMode; label: string }[] = [
+  { value: "equal", label: "Split equally" },
+  { value: "full_amount", label: "Full amount (one payer)" },
+  { value: "group_split", label: "Group split" },
+];
+
+export interface JournalModalSubmitPayload {
+  title: string;
+  note: string;
+  rating: number | null;
+  amountCents: number | null;
+  category: JournalSpendingCategory | null;
+  splitBetween: number;
+  splitMode: JournalSplitMode;
+  paidByName: string | null;
+  files: File[];
+}
+
 interface JournalModalProps {
   open: boolean;
   onClose: () => void;
   title: string;
   defaultTitle: string;
   defaultSplitCount: number;
-  onSubmit: (data: {
-    title: string;
-    note: string;
-    rating: number | null;
-    amountCents: number | null;
-    category: JournalSpendingCategory | null;
-    splitBetween: number;
-    files: File[];
-  }) => Promise<void>;
+  /** Shown under the modal title. */
+  subtitle?: string;
+  /** Read-only line e.g. guest name or email. */
+  capturedByLabel: string;
+  /** Past names + roster for “Who paid?” datalist. */
+  rosterNames?: string[];
+  onSubmit: (data: JournalModalSubmitPayload) => Promise<void>;
 }
 
 export function JournalModal({
@@ -34,6 +50,9 @@ export function JournalModal({
   title,
   defaultTitle,
   defaultSplitCount,
+  subtitle = "Capture a bite, a view, what you spent — quick notes beat perfect prose.",
+  capturedByLabel,
+  rosterNames = [],
   onSubmit,
 }: JournalModalProps) {
   const [note, setNote] = useState("");
@@ -41,9 +60,13 @@ export function JournalModal({
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<JournalSpendingCategory | "">("food");
   const [split, setSplit] = useState(String(defaultSplitCount));
+  const [splitMode, setSplitMode] = useState<JournalSplitMode>("equal");
+  const [paidBy, setPaidBy] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [entryTitle, setEntryTitle] = useState(defaultTitle);
+
+  const datalistId = useMemo(() => `paid-roster-${Math.random().toString(36).slice(2)}`, []);
 
   if (!open) return null;
 
@@ -62,11 +85,14 @@ export function JournalModal({
         amountCents: cents !== null && !Number.isNaN(cents) ? cents : null,
         category: category || null,
         splitBetween: Math.max(1, parseInt(split, 10) || defaultSplitCount),
+        splitMode,
+        paidByName: paidBy.trim() ? paidBy.trim().slice(0, 120) : null,
         files,
       });
       setNote("");
       setRating(null);
       setAmount("");
+      setPaidBy("");
       setFiles([]);
       setEntryTitle(defaultTitle);
       onClose();
@@ -80,16 +106,23 @@ export function JournalModal({
       <button type="button" className="absolute inset-0 cursor-default" aria-label="Close" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-surface-card rounded-2xl border border-border shadow-xl max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="text-lg font-bold">{title}</h2>
+          <div>
+            <h2 className="text-lg font-bold">{title}</h2>
+            <p className="text-xs text-text-muted mt-1 max-w-[280px]">{subtitle}</p>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl hover:bg-surface-muted cursor-pointer"
+            className="p-2 rounded-xl hover:bg-surface-muted cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
         <form onSubmit={(e) => void handleSubmit(e)} className="px-5 py-4 space-y-4">
+          <div className="rounded-xl bg-surface-muted/80 px-3 py-2 text-xs">
+            <span className="text-text-muted">Captured by </span>
+            <span className="font-medium">{capturedByLabel}</span>
+          </div>
           <div>
             <label className="text-xs font-medium text-text-muted">Title</label>
             <input
@@ -163,6 +196,35 @@ export function JournalModal({
                 inputMode="numeric"
               />
             </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-text-muted">Split mode</label>
+            <select
+              value={splitMode}
+              onChange={(e) => setSplitMode(e.target.value as JournalSplitMode)}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+            >
+              {SPLIT_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-text-muted">Who paid?</label>
+            <input
+              value={paidBy}
+              onChange={(e) => setPaidBy(e.target.value)}
+              list={datalistId}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+              placeholder="Name (optional)"
+            />
+            <datalist id={datalistId}>
+              {rosterNames.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
           </div>
           <div>
             <label className="text-xs font-medium text-text-muted flex items-center gap-2">

@@ -16,4 +16,7 @@ export type {
   TripMember,
   TripMemberRole,
   TripReportPayload,
+  PersonTripStats,
+  JournalSplitMode,
+  SuperlativeId,
 } from "./trip.js";

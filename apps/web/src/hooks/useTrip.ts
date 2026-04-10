@@ -17,7 +17,11 @@ interface UseTripResult {
   /** Reload trip data. Use silent mode to avoid full-page loading (e.g. after enrich). */
   refetch: (options?: { silent?: boolean }) => Promise<void>;
   toggleItemChecked: (itemId: string, checked: boolean) => Promise<void>;
-  updateTripMeta: (patch: { phase?: Trip["phase"]; defaultSplitCount?: number }) => Promise<void>;
+  updateTripMeta: (patch: {
+    phase?: Trip["phase"];
+    defaultSplitCount?: number;
+    coverImageUrl?: string | null;
+  }) => Promise<void>;
 }
 
 function snakeToCamel<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
@@ -59,7 +63,9 @@ export function useTrip(tripId: string | undefined): UseTripResult {
     try {
       const { data: tripRow, error: tripErr } = await supabase
         .from("trips")
-        .select("*")
+        .select(
+          "id, title, cover_image_url, start_date, end_date, source_doc_url, owner_id, share_slug, raw_doc_text, created_at, phase, default_split_count",
+        )
         .eq("id", tripId)
         .single();
 
@@ -208,14 +214,26 @@ export function useTrip(tripId: string | undefined): UseTripResult {
   }, []);
 
   const updateTripMeta = useCallback(
-    async (patch: { phase?: Trip["phase"]; defaultSplitCount?: number }) => {
+    async (patch: {
+      phase?: Trip["phase"];
+      defaultSplitCount?: number;
+      coverImageUrl?: string | null;
+    }) => {
       if (!tripId) return;
       const row: Record<string, unknown> = {};
       if (patch.phase !== undefined) row.phase = patch.phase;
       if (patch.defaultSplitCount !== undefined) row.default_split_count = patch.defaultSplitCount;
+      if (patch.coverImageUrl !== undefined) row.cover_image_url = patch.coverImageUrl;
       if (Object.keys(row).length === 0) return;
       await supabase.from("trips").update(row).eq("id", tripId);
-      setTrip((prev) => (prev ? { ...prev, ...patch } : prev));
+      setTrip((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev };
+        if (patch.phase !== undefined) next.phase = patch.phase;
+        if (patch.defaultSplitCount !== undefined) next.defaultSplitCount = patch.defaultSplitCount;
+        if (patch.coverImageUrl !== undefined) next.coverImageUrl = patch.coverImageUrl ?? undefined;
+        return next;
+      });
     },
     [tripId],
   );

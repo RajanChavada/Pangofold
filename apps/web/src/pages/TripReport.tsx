@@ -1,12 +1,32 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, MapPin, PieChart, Trophy, Calendar, AlertCircle, Image as ImageIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  MapPin,
+  PieChart,
+  Trophy,
+  Calendar,
+  AlertCircle,
+  Image as ImageIcon,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import { useTrip } from "../hooks/useTrip";
 import { useJournal } from "../hooks/useJournal";
 import { useAuth } from "../hooks/useAuth";
 import { buildTripReportPayload } from "../lib/trip-report";
 import { supabase } from "../lib/supabase";
-import type { Trip } from "@pangofold/shared";
+import type { Trip, SuperlativeId } from "@pangofold/shared";
+
+const SUPERLATIVE_COPY: Record<
+  SuperlativeId,
+  { title: string; blurb: string }
+> = {
+  foodie: { title: "The Foodie", blurb: "Most food-tagged logs" },
+  highRoller: { title: "High Roller", blurb: "Highest spend on the tab" },
+  historian: { title: "The Historian", blurb: "Richest notes & photos" },
+  navigator: { title: "The Navigator", blurb: "Most activity-tagged logs" },
+};
 
 function formatMoney(cents: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
@@ -114,9 +134,57 @@ export function TripReport() {
         </button>
 
         <h1 className="text-2xl font-bold tracking-tight">{trip.title}</h1>
-        <p className="text-sm text-text-muted mt-1">Post-trip summary</p>
+        <p className="text-sm text-text-muted mt-1">Pangofold Wrapped — post-trip story</p>
 
         <div className="mt-6 space-y-4">
+          <section className="bg-gradient-to-br from-violet-600/10 to-amber-500/10 rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="w-5 h-5 text-violet-600" />
+              <h2 className="font-semibold">Superlatives</h2>
+            </div>
+            <p className="text-xs text-text-muted mb-4">
+              Tie-breaks: higher score wins; if tied, names are sorted A–Z (see trip-report.ts).
+            </p>
+            <ul className="space-y-3">
+              {(Object.keys(payload.superlatives) as SuperlativeId[]).map((key) => {
+                const name = payload.superlatives[key];
+                const copy = SUPERLATIVE_COPY[key];
+                return (
+                  <li
+                    key={key}
+                    className="flex items-start justify-between gap-3 text-sm border-b border-border/60 pb-3 last:border-0 last:pb-0"
+                  >
+                    <div>
+                      <p className="font-semibold text-text">{copy.title}</p>
+                      <p className="text-xs text-text-muted">{copy.blurb}</p>
+                    </div>
+                    <span className="font-medium text-primary shrink-0">{name ?? "—"}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          {payload.perPerson.length > 0 && (
+            <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="w-5 h-5 text-slate-600" />
+                <h2 className="font-semibold">By traveler</h2>
+              </div>
+              <ul className="space-y-2 text-sm">
+                {payload.perPerson.map((p) => (
+                  <li key={p.name} className="flex flex-wrap justify-between gap-2 border-b border-border/40 pb-2 last:border-0">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-text-muted text-xs">
+                      {formatMoney(p.attributedSpendCents)} · {p.logCount} logs · {p.photoCount} photos · {p.foodLogCount}{" "}
+                      food
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
             <div className="flex items-center gap-2 mb-3">
               <PieChart className="w-5 h-5 text-primary" />

@@ -24,3 +24,6 @@ verify_jwt = false
 
 [functions.enrich-places]
 verify_jwt = false
+
+[functions.guest-journal-submit]
+verify_jwt = false
