@@ -13,3 +13,4 @@ android/
 
 # Supabase
 supabase/.temp/
+.vercel
