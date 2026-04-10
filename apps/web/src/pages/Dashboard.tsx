@@ -49,10 +49,20 @@ export function Dashboard() {
 
       if (!error && data) {
         setTrips(
-          data.map((t: any) => ({
-            ...t,
-            destination_count: t.destinations?.length ?? 0,
-          }))
+          data.map((row) => {
+            const t = row as TripSummary & { destinations?: unknown[] };
+            return {
+              id: t.id,
+              title: t.title,
+              cover_image_url: t.cover_image_url,
+              start_date: t.start_date,
+              end_date: t.end_date,
+              share_slug: t.share_slug,
+              source_doc_url: t.source_doc_url,
+              created_at: t.created_at,
+              destination_count: Array.isArray(t.destinations) ? t.destinations.length : 0,
+            };
+          })
         );
       }
       setLoading(false);

@@ -1,5 +1,13 @@
-import { useEffect, useState, useCallback } from "react";
-import type { Trip, Destination, DayItinerary, ItineraryItem, FoodSpot, Activity } from "@pangofold/shared";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import type {
+  Trip,
+  Destination,
+  DayItinerary,
+  ItineraryItem,
+  FoodSpot,
+  Activity,
+  Place,
+} from "@pangofold/shared";
 import { supabase } from "../lib/supabase";
 
 interface UseTripResult {
@@ -8,6 +16,7 @@ interface UseTripResult {
   error: string | null;
   refetch: () => Promise<void>;
   toggleItemChecked: (itemId: string, checked: boolean) => Promise<void>;
+  updateTripMeta: (patch: { phase?: Trip["phase"]; defaultSplitCount?: number }) => Promise<void>;
 }
 
 function snakeToCamel<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
@@ -17,6 +26,20 @@ function snakeToCamel<T extends Record<string, unknown>>(row: T): Record<string,
     result[camelKey] = value;
   }
   return result;
+}
+
+function mapPlaceRow(row: Record<string, unknown>): Place {
+  const p = snakeToCamel(row) as Record<string, unknown>;
+  return {
+    id: String(p.id),
+    googlePlaceId: (p.googlePlaceId as string) ?? null,
+    displayName: String(p.displayName ?? ""),
+    formattedAddress: (p.formattedAddress as string) ?? null,
+    lat: (p.lat as number) ?? null,
+    lng: (p.lng as number) ?? null,
+    rating: p.rating != null ? Number(p.rating) : null,
+    photoRefs: (p.photoRefs as string[]) ?? null,
+  };
 }
 
 export function useTrip(tripId: string | undefined): UseTripResult {
@@ -44,6 +67,7 @@ export function useTrip(tripId: string | undefined): UseTripResult {
         .eq("trip_id", tripId)
         .order("sort_order");
 
+      const placeIds = new Set<string>();
       const destinations: Destination[] = [];
 
       for (const dest of dests || []) {
@@ -63,7 +87,11 @@ export function useTrip(tripId: string | undefined): UseTripResult {
 
           days.push({
             ...(snakeToCamel(day) as unknown as DayItinerary),
-            items: (items || []).map((i) => snakeToCamel(i) as unknown as ItineraryItem),
+            items: (items || []).map((i) => {
+              const row = snakeToCamel(i) as unknown as ItineraryItem;
+              if (row.placeId) placeIds.add(row.placeId);
+              return row;
+            }),
           });
         }
 
@@ -73,11 +101,21 @@ export function useTrip(tripId: string | undefined): UseTripResult {
           .eq("destination_id", dest.id)
           .order("sort_order");
 
+        for (const f of foodRows || []) {
+          const r = snakeToCamel(f) as unknown as FoodSpot;
+          if (r.placeId) placeIds.add(r.placeId);
+        }
+
         const { data: actRows } = await supabase
           .from("activities")
           .select("*")
           .eq("destination_id", dest.id)
           .order("sort_order");
+
+        for (const a of actRows || []) {
+          const r = snakeToCamel(a) as unknown as Activity;
+          if (r.placeId) placeIds.add(r.placeId);
+        }
 
         destinations.push({
           ...(snakeToCamel(dest) as unknown as Destination),
@@ -90,8 +128,41 @@ export function useTrip(tripId: string | undefined): UseTripResult {
         });
       }
 
+      const placesMap: Record<string, Place> = {};
+      if (placeIds.size > 0) {
+        const { data: placeRows } = await supabase
+          .from("places")
+          .select("*")
+          .in("id", [...placeIds]);
+
+        for (const pr of placeRows || []) {
+          const pl = mapPlaceRow(pr as unknown as Record<string, unknown>);
+          placesMap[pl.id] = pl;
+        }
+      }
+
+      for (const d of destinations) {
+        d.foodSpots = d.foodSpots.map((f) => ({
+          ...f,
+          place: f.placeId ? placesMap[f.placeId] ?? null : null,
+        }));
+        d.activities = d.activities.map((a) => ({
+          ...a,
+          place: a.placeId ? placesMap[a.placeId] ?? null : null,
+        }));
+        d.days = d.days.map((day) => ({
+          ...day,
+          items: day.items.map((it) => ({
+            ...it,
+            place: it.placeId ? placesMap[it.placeId] ?? null : null,
+          })),
+        }));
+      }
+
+      const tr = snakeToCamel(tripRow) as unknown as Trip;
+
       setTrip({
-        ...(snakeToCamel(tripRow) as unknown as Trip),
+        ...tr,
         destinations,
       });
     } catch (err) {
@@ -128,7 +199,20 @@ export function useTrip(tripId: string | undefined): UseTripResult {
     });
   }, []);
 
-  return { trip, loading, error, refetch: fetchTrip, toggleItemChecked };
+  const updateTripMeta = useCallback(
+    async (patch: { phase?: Trip["phase"]; defaultSplitCount?: number }) => {
+      if (!tripId) return;
+      const row: Record<string, unknown> = {};
+      if (patch.phase !== undefined) row.phase = patch.phase;
+      if (patch.defaultSplitCount !== undefined) row.default_split_count = patch.defaultSplitCount;
+      if (Object.keys(row).length === 0) return;
+      await supabase.from("trips").update(row).eq("id", tripId);
+      setTrip((prev) => (prev ? { ...prev, ...patch } : prev));
+    },
+    [tripId],
+  );
+
+  return { trip, loading, error, refetch: fetchTrip, toggleItemChecked, updateTripMeta };
 }
 
 export function useTripBySlug(slug: string | undefined): UseTripResult {
@@ -138,6 +222,7 @@ export function useTripBySlug(slug: string | undefined): UseTripResult {
 
   useEffect(() => {
     if (!slug) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset loading before slug→id fetch
     setSlugLoading(true);
     supabase
       .from("trips")
@@ -160,4 +245,25 @@ export function useTripBySlug(slug: string | undefined): UseTripResult {
     loading: slugLoading || result.loading,
     error: slugError || result.error,
   };
+}
+
+/** Detect overlapping scheduled items on the same day (requires time_minutes from parse). */
+export function useScheduleConflicts(dest: Destination | undefined, day: DayItinerary | undefined) {
+  return useMemo(() => {
+    if (!dest || !day?.items?.length) return [];
+    const withTime = day.items
+      .filter((i) => i.timeMinutes != null && i.category !== "transport")
+      .sort((a, b) => (a.timeMinutes ?? 0) - (b.timeMinutes ?? 0));
+    const conflicts: { a: ItineraryItem; b: ItineraryItem }[] = [];
+    for (let i = 0; i < withTime.length - 1; i++) {
+      const cur = withTime[i];
+      const next = withTime[i + 1];
+      const c = cur.timeMinutes ?? 0;
+      const n = next.timeMinutes ?? 0;
+      if (n - c < 30 && n >= c) {
+        conflicts.push({ a: cur, b: next });
+      }
+    }
+    return conflicts;
+  }, [dest, day]);
 }

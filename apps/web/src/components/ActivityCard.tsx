@@ -40,6 +40,12 @@ export function ActivityCard({ activity }: ActivityCardProps) {
           </span>
         )}
       </div>
+      {activity.place?.formattedAddress && (
+        <p className="text-xs text-text-muted mt-2">{activity.place.formattedAddress}</p>
+      )}
+      {activity.place?.rating != null && (
+        <p className="text-xs text-amber-700 mt-0.5">Google ★ {activity.place.rating.toFixed(1)}</p>
+      )}
     </div>
   );
 }

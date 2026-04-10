@@ -1,9 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useParams, useNavigate } from "react-router";
 import {
   ArrowLeft,
-  Save,
   Plus,
   Trash2,
   GripVertical,
@@ -12,7 +11,7 @@ import {
   MapPin,
   Eye,
 } from "lucide-react";
-import type { ItineraryItem, FoodSpot, Activity, ItemCategory, FoodType } from "@pangofold/shared";
+import type { ItineraryItem, FoodSpot, Activity, TripPhase, TripMember } from "@pangofold/shared";
 import { CATEGORIES, FOOD_TYPES } from "@pangofold/shared";
 import { useTrip } from "../hooks/useTrip";
 import { supabase } from "../lib/supabase";
@@ -22,7 +21,7 @@ import { MOCK_TRIP } from "../lib/mock-data";
 export function TripEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { trip: dbTrip, loading, error, refetch } = useTrip(id);
+  const { trip: dbTrip, loading, error, refetch, updateTripMeta } = useTrip(id);
 
   const useMock = !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
@@ -35,6 +34,29 @@ export function TripEdit() {
     null | { type: "item" | "food" | "activity"; id: string }
   >(null);
   const [removeLoading, setRemoveLoading] = useState(false);
+  const [memberUid, setMemberUid] = useState("");
+  const [members, setMembers] = useState<TripMember[]>([]);
+  const [memberSaving, setMemberSaving] = useState(false);
+
+  useEffect(() => {
+    if (!id || useMock) return;
+    void supabase
+      .from("trip_members")
+      .select("*")
+      .eq("trip_id", id)
+      .then(({ data }) => {
+        setMembers(
+          (data || []).map((row) => {
+            const o = row as Record<string, unknown>;
+            const camel: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(o)) {
+              camel[k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = v;
+            }
+            return camel as unknown as TripMember;
+          }),
+        );
+      });
+  }, [id, useMock]);
 
   const confirmRemove = useCallback(async () => {
     if (!pendingRemove) return;
@@ -78,6 +100,34 @@ export function TripEdit() {
       </div>
     );
   }
+
+  const addMember = async () => {
+    if (!memberUid.trim() || !trip || useMock) return;
+    setMemberSaving(true);
+    try {
+      const { error: insErr } = await supabase.from("trip_members").insert({
+        trip_id: trip.id,
+        user_id: memberUid.trim(),
+        role: "editor",
+      });
+      if (!insErr) {
+        setMemberUid("");
+        const { data } = await supabase.from("trip_members").select("*").eq("trip_id", trip.id);
+        setMembers(
+          (data || []).map((row) => {
+            const o = row as Record<string, unknown>;
+            const camel: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(o)) {
+              camel[k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = v;
+            }
+            return camel as unknown as TripMember;
+          }),
+        );
+      }
+    } finally {
+      setMemberSaving(false);
+    }
+  };
 
   const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
@@ -198,6 +248,70 @@ export function TripEdit() {
             </div>
           </div>
         </div>
+
+        {!useMock && (
+          <div className="px-5 mb-6 space-y-4">
+            <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
+              <h2 className="text-sm font-semibold">Trip mode &amp; group</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-text-muted">Phase</label>
+                  <select
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                    value={trip.phase ?? "planning"}
+                    onChange={(e) => void updateTripMeta({ phase: e.target.value as TripPhase })}
+                  >
+                    <option value="planning">Planning</option>
+                    <option value="active">Active (on trip)</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted">Group size (equal split)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                    value={trip.defaultSplitCount ?? 1}
+                    onChange={(e) =>
+                      void updateTripMeta({ defaultSplitCount: Math.max(1, parseInt(e.target.value, 10) || 1) })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
+              <h2 className="text-sm font-semibold">Collaborators</h2>
+              <p className="text-xs text-text-muted">
+                Add another Pangofold user by their Supabase auth user UUID (editors can log journal entries).
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={memberUid}
+                  onChange={(e) => setMemberUid(e.target.value)}
+                  placeholder="User UUID"
+                  className="flex-1 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => void addMember()}
+                  disabled={memberSaving}
+                  className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-medium disabled:opacity-50 cursor-pointer"
+                >
+                  Add
+                </button>
+              </div>
+              {members.length > 0 && (
+                <ul className="text-xs font-mono space-y-1 text-text-muted">
+                  {members.map((m) => (
+                    <li key={m.id}>{m.userId} ({m.role})</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Destination selector */}
         {trip.destinations.length > 1 && (

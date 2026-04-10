@@ -1,5 +1,5 @@
 import type { Trip } from "@pangofold/shared";
-import { MapPin, Calendar, Share2, ArrowLeft, Pencil, Check, Trash2 } from "lucide-react";
+import { MapPin, Calendar, Share2, ArrowLeft, Pencil, Check, Trash2, BarChart3 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { cn } from "../lib/cn";
@@ -86,6 +86,15 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
           </button>
 
           <div className="flex gap-2">
+            {editable && (
+              <Link
+                to={`/trip/${trip.id}/report`}
+                className="p-2 rounded-xl hover:bg-surface-muted transition-colors"
+                title="Trip report"
+              >
+                <BarChart3 className="w-4 h-4" />
+              </Link>
+            )}
             {editable && (
               <Link
                 to={`/trip/${trip.id}/edit`}

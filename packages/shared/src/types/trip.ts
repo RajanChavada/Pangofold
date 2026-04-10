@@ -1,14 +1,18 @@
+export type TripPhase = "planning" | "active" | "completed";
+
 export interface Trip {
   id: string;
   title: string;
   coverImageUrl?: string;
-  startDate: string;
-  endDate: string;
-  sourceDocUrl: string;
+  startDate?: string;
+  endDate?: string;
+  sourceDocUrl?: string;
   ownerId: string;
   shareSlug: string;
   rawDocText?: string;
   createdAt: string;
+  phase?: TripPhase;
+  defaultSplitCount?: number;
   destinations: Destination[];
 }
 
@@ -35,6 +39,18 @@ export interface DayItinerary {
 }
 
 export type ItemCategory = "food" | "activity" | "transport" | "accommodation" | "other";
+export type ItemCostUnit = "per_person" | "total" | "unknown";
+
+export interface Place {
+  id: string;
+  googlePlaceId?: string | null;
+  displayName: string;
+  formattedAddress?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  rating?: number | null;
+  photoRefs?: string[] | null;
+}
 
 export interface ItineraryItem {
   id: string;
@@ -47,6 +63,11 @@ export interface ItineraryItem {
   cost?: string;
   isChecked: boolean;
   sortOrder: number;
+  placeId?: string | null;
+  place?: Place | null;
+  costAmount?: number | null;
+  costUnit?: ItemCostUnit;
+  timeMinutes?: number | null;
 }
 
 export type FoodType = "restaurant" | "cafe" | "street" | "bakery" | "bar";
@@ -59,6 +80,8 @@ export interface FoodSpot {
   link?: string;
   priceRange?: string;
   sortOrder: number;
+  placeId?: string | null;
+  place?: Place | null;
 }
 
 export interface Activity {
@@ -69,4 +92,63 @@ export interface Activity {
   link?: string;
   location?: string;
   sortOrder: number;
+  placeId?: string | null;
+  place?: Place | null;
+}
+
+export type JournalSpendingCategory =
+  | "food"
+  | "transport"
+  | "activities"
+  | "accommodation"
+  | "other";
+
+export interface JournalPhoto {
+  id: string;
+  entryId: string;
+  storagePath: string;
+  sortOrder: number;
+  caption?: string | null;
+  publicUrl?: string | null;
+}
+
+export interface JournalEntry {
+  id: string;
+  tripId: string;
+  authorId: string;
+  itineraryItemId?: string | null;
+  placeId?: string | null;
+  title: string;
+  note?: string | null;
+  rating?: number | null;
+  amountCents?: number | null;
+  currency: string;
+  category?: JournalSpendingCategory | null;
+  splitBetween: number;
+  loggedAt: string;
+  lat?: number | null;
+  lng?: number | null;
+  createdAt: string;
+  photos?: JournalPhoto[];
+}
+
+export type TripMemberRole = "viewer" | "editor";
+
+export interface TripMember {
+  id: string;
+  tripId: string;
+  userId: string;
+  role: TripMemberRole;
+  invitedEmail?: string | null;
+  createdAt: string;
+}
+
+export interface TripReportPayload {
+  generatedAt: string;
+  spendByCategory: Record<JournalSpendingCategory | "uncategorized", number>;
+  totalSpendCents: number;
+  bestRated: { entryId: string; title: string; rating: number } | null;
+  mostExpensiveDay: { date: string; cents: number } | null;
+  unvisitedItems: { id: string; title: string }[];
+  topPhotoPaths: string[];
 }

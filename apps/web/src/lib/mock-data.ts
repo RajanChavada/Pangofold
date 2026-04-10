@@ -10,6 +10,8 @@ export const MOCK_TRIP: Trip = {
   ownerId: "mock-user",
   shareSlug: "a1b2c3d4",
   createdAt: "2026-04-09T00:00:00Z",
+  phase: "planning",
+  defaultSplitCount: 2,
   destinations: [
     {
       id: "dest-1",

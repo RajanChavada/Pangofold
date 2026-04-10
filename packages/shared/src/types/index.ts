@@ -1,1 +1,19 @@
-export type { Trip, Destination, DayItinerary, ItineraryItem, ItemCategory, FoodSpot, FoodType, Activity } from "./trip.js";
+export type {
+  Trip,
+  Destination,
+  DayItinerary,
+  ItineraryItem,
+  ItemCategory,
+  ItemCostUnit,
+  FoodSpot,
+  FoodType,
+  Activity,
+  Place,
+  TripPhase,
+  JournalEntry,
+  JournalPhoto,
+  JournalSpendingCategory,
+  TripMember,
+  TripMemberRole,
+  TripReportPayload,
+} from "./trip.js";

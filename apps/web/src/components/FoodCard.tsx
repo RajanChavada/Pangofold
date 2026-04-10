@@ -45,6 +45,12 @@ export function FoodCard({ spot }: FoodCardProps) {
           </a>
         )}
       </div>
+      {spot.place?.formattedAddress && (
+        <p className="text-xs text-text-muted mt-2">{spot.place.formattedAddress}</p>
+      )}
+      {spot.place?.rating != null && (
+        <p className="text-xs text-amber-700 mt-0.5">Google ★ {spot.place.rating.toFixed(1)}</p>
+      )}
       {spot.notes && (
         <p className="text-sm text-text-muted mt-2 leading-relaxed">{spot.notes}</p>
       )}

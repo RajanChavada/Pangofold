@@ -1,0 +1,265 @@
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { ArrowLeft, MapPin, PieChart, Trophy, Calendar, AlertCircle, Image as ImageIcon } from "lucide-react";
+import { useTrip } from "../hooks/useTrip";
+import { useJournal } from "../hooks/useJournal";
+import { useAuth } from "../hooks/useAuth";
+import { buildTripReportPayload } from "../lib/trip-report";
+import { supabase } from "../lib/supabase";
+import type { Trip } from "@pangofold/shared";
+
+function formatMoney(cents: number, currency = "USD") {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
+}
+
+function plannedPoints(trip: Trip) {
+  const pts: { label: string; lat: number; lng: number }[] = [];
+  for (const d of trip.destinations) {
+    for (const day of d.days) {
+      for (const it of day.items) {
+        const p = it.place;
+        if (p?.lat != null && p?.lng != null) {
+          pts.push({ label: it.title, lat: p.lat, lng: p.lng });
+        }
+      }
+    }
+    for (const f of d.foodSpots) {
+      const p = f.place;
+      if (p?.lat != null && p?.lng != null) pts.push({ label: f.name, lat: p.lat, lng: p.lng });
+    }
+    for (const a of d.activities) {
+      const p = a.place;
+      if (p?.lat != null && p?.lng != null) pts.push({ label: a.name, lat: p.lat, lng: p.lng });
+    }
+  }
+  return pts;
+}
+
+export function TripReport() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+  const { trip, loading, error } = useTrip(id);
+  const { entries, loading: jLoading } = useJournal(id);
+  const [saving, setSaving] = useState(false);
+
+  const payload = useMemo(() => {
+    if (!trip) return null;
+    return buildTripReportPayload(trip, entries);
+  }, [trip, entries]);
+
+  const actualPoints = useMemo(() => {
+    return entries
+      .filter((e) => e.lat != null && e.lng != null)
+      .map((e) => ({ label: e.title, lat: e.lat!, lng: e.lng! }));
+  }, [entries]);
+
+  const planned = trip ? plannedPoints(trip) : [];
+
+  const handleSaveSnapshot = async () => {
+    if (!trip || !payload || !user) return;
+    setSaving(true);
+    try {
+      await supabase.from("trip_reports").insert({
+        trip_id: trip.id,
+        payload: payload as unknown as Record<string, unknown>,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (authLoading || loading || jLoading) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error || !trip) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-4">
+        <p className="text-red-600">{error || "Not found"}</p>
+        <Link to="/dashboard" className="text-primary font-medium">
+          Back to trips
+        </Link>
+      </div>
+    );
+  }
+
+  if (user?.id !== trip.ownerId) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-4">
+        <p className="text-text-muted">Only the trip owner can view this report.</p>
+        <button type="button" onClick={() => navigate(`/trip/${trip.id}`)} className="text-primary font-medium">
+          Go to trip
+        </button>
+      </div>
+    );
+  }
+
+  if (!payload) return null;
+
+  return (
+    <div className="min-h-dvh bg-surface pb-12">
+      <div className="max-w-lg mx-auto px-5 pt-6">
+        <button
+          type="button"
+          onClick={() => navigate(`/trip/${trip.id}`)}
+          className="flex items-center gap-2 text-text-muted hover:text-text mb-6"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
+
+        <h1 className="text-2xl font-bold tracking-tight">{trip.title}</h1>
+        <p className="text-sm text-text-muted mt-1">Post-trip summary</p>
+
+        <div className="mt-6 space-y-4">
+          <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <PieChart className="w-5 h-5 text-primary" />
+              <h2 className="font-semibold">Spend by category</h2>
+            </div>
+            <p className="text-2xl font-bold">{formatMoney(payload.totalSpendCents)}</p>
+            <ul className="mt-3 space-y-1 text-sm">
+              {(Object.entries(payload.spendByCategory) as [string, number][]).map(([k, v]) =>
+                v > 0 ? (
+                  <li key={k} className="flex justify-between">
+                    <span className="text-text-muted capitalize">{k}</span>
+                    <span>{formatMoney(v)}</span>
+                  </li>
+                ) : null,
+              )}
+            </ul>
+          </section>
+
+          <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <Trophy className="w-5 h-5 text-amber-600" />
+              <h2 className="font-semibold">Best rated</h2>
+            </div>
+            {payload.bestRated ? (
+              <p className="text-sm">
+                <strong>{payload.bestRated.title}</strong> — {payload.bestRated.rating}/5
+              </p>
+            ) : (
+              <p className="text-sm text-text-muted">No ratings logged yet.</p>
+            )}
+          </section>
+
+          <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              <h2 className="font-semibold">Most expensive day</h2>
+            </div>
+            {payload.mostExpensiveDay ? (
+              <p className="text-sm">
+                {payload.mostExpensiveDay.date} — {formatMoney(payload.mostExpensiveDay.cents)}
+              </p>
+            ) : (
+              <p className="text-sm text-text-muted">No spend logged by day.</p>
+            )}
+          </section>
+
+          <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle className="w-5 h-5 text-orange-600" />
+              <h2 className="font-semibold">Planned but not visited</h2>
+            </div>
+            {payload.unvisitedItems.length > 0 ? (
+              <ul className="text-sm space-y-1 list-disc pl-5">
+                {payload.unvisitedItems.map((u: { id: string; title: string }) => (
+                  <li key={u.id}>{u.title}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-text-muted">
+                No unvisited items detected (or trip not marked complete / still in future).
+              </p>
+            )}
+          </section>
+
+          <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <ImageIcon className="w-5 h-5 text-violet-600" />
+              <h2 className="font-semibold">Highlights</h2>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {entries
+                .flatMap((e) => e.photos || [])
+                .slice(0, 9)
+                .map((p) =>
+                  p.publicUrl ? (
+                    <img
+                      key={p.id}
+                      src={p.publicUrl}
+                      alt=""
+                      className="w-full aspect-square object-cover rounded-lg"
+                    />
+                  ) : null,
+                )}
+            </div>
+          </section>
+
+          <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <MapPin className="w-5 h-5 text-emerald-600" />
+              <h2 className="font-semibold">Planned vs actual</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="font-semibold text-text-muted mb-1">Planned (enriched)</p>
+                <ul className="space-y-1 max-h-40 overflow-y-auto">
+                  {planned.map((p, i) => (
+                    <li key={`p-${i}`}>
+                      <a
+                        className="text-primary hover:underline"
+                        href={`https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {p.label}
+                      </a>
+                    </li>
+                  ))}
+                  {planned.length === 0 && <li className="text-text-muted">No place pins yet.</li>}
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-text-muted mb-1">Logged (GPS)</p>
+                <ul className="space-y-1 max-h-40 overflow-y-auto">
+                  {actualPoints.map((p, i) => (
+                    <li key={`a-${i}`}>
+                      <a
+                        className="text-primary hover:underline"
+                        href={`https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {p.label}
+                      </a>
+                    </li>
+                  ))}
+                  {actualPoints.length === 0 && (
+                    <li className="text-text-muted">No journal entries with location.</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <button
+            type="button"
+            onClick={() => void handleSaveSnapshot()}
+            disabled={saving}
+            className="w-full py-3 rounded-xl bg-primary/10 text-primary font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
+          >
+            {saving ? "Saving…" : "Save snapshot to history"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

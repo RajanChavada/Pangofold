@@ -12,6 +12,7 @@ import {
   Clock,
   Square,
   CheckSquare,
+  BookPlus,
 } from "lucide-react";
 
 const CATEGORY_CONFIG: Record<ItemCategory, { color: string; bg: string; icon: typeof Utensils }> = {
@@ -26,9 +27,17 @@ interface ItineraryCardProps {
   item: ItineraryItem;
   checklistMode?: boolean;
   onToggleChecked?: (id: string, checked: boolean) => void;
+  onLogThis?: (itemId: string) => void;
+  scheduleConflict?: boolean;
 }
 
-export function ItineraryCard({ item, checklistMode = false, onToggleChecked }: ItineraryCardProps) {
+export function ItineraryCard({
+  item,
+  checklistMode = false,
+  onToggleChecked,
+  onLogThis,
+  scheduleConflict,
+}: ItineraryCardProps) {
   const config = CATEGORY_CONFIG[item.category];
   const Icon = config.icon;
 
@@ -77,6 +86,17 @@ export function ItineraryCard({ item, checklistMode = false, onToggleChecked }: 
             <p className="text-sm text-text-muted mt-1 leading-relaxed">{item.description}</p>
           )}
 
+          {scheduleConflict && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-2">
+              Tight schedule: less than 30 minutes before the next timed item.
+            </p>
+          )}
+          {item.place?.formattedAddress && (
+            <p className="text-xs text-text-muted mt-1">{item.place.formattedAddress}</p>
+          )}
+          {item.place?.rating != null && (
+            <p className="text-xs text-amber-700 mt-0.5">Google ★ {item.place.rating.toFixed(1)}</p>
+          )}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
             {item.location && (
               <span className="flex items-center gap-1 text-xs text-text-muted">
@@ -100,6 +120,27 @@ export function ItineraryCard({ item, checklistMode = false, onToggleChecked }: 
                 <ExternalLink className="w-3 h-3" />
                 Link
               </a>
+            )}
+            {item.place?.lat != null && item.place?.lng != null && (
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${item.place.lat},${item.place.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <MapPin className="w-3 h-3" />
+                Navigate
+              </a>
+            )}
+            {onLogThis && (
+              <button
+                type="button"
+                onClick={() => onLogThis(item.id)}
+                className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline cursor-pointer"
+              >
+                <BookPlus className="w-3 h-3" />
+                Log this
+              </button>
             )}
           </div>
         </div>

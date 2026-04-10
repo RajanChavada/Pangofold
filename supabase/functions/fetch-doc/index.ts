@@ -46,18 +46,73 @@ serve(async (req) => {
     const doc = await docRes.json();
     const { title, textContent, links, imageUrls } = extractDocContent(doc);
     const structured = preParseStructured(textContent, links);
+    const mapsResolved = await resolveMapsLinks(links);
 
     return new Response(
-      JSON.stringify({ title, textContent, links, imageUrls, docUrl, structured }),
+      JSON.stringify({ title, textContent, links, imageUrls, docUrl, structured, mapsResolved }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ error: (err as Error).message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });
+
+function isMapsLink(url: string): boolean {
+  return /goo\.gl|maps\.app\.goo\.gl|google\.com\/maps|maps\.google/i.test(url);
+}
+
+async function delayMs(ms: number) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+/** Follow short Maps URLs and extract @lat,lng or q=lat,lng for enrichment hints. */
+async function resolveGoogleMapsUrl(url: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const u = url.startsWith("http") ? url : `https://${url}`;
+    const res = await fetch(u, { redirect: "follow" });
+    const finalUrl = res.url;
+    const at = finalUrl.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)(?:,|\/|$)/);
+    if (at) {
+      return { lat: parseFloat(at[1]), lng: parseFloat(at[2]) };
+    }
+    const parsed = new URL(finalUrl);
+    const q = parsed.searchParams.get("q");
+    if (q) {
+      const ll = q.match(/(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+      if (ll) return { lat: parseFloat(ll[1]), lng: parseFloat(ll[2]) };
+    }
+    const center = parsed.searchParams.get("center");
+    if (center) {
+      const ll = center.match(/(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+      if (ll) return { lat: parseFloat(ll[1]), lng: parseFloat(ll[2]) };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function resolveMapsLinks(links: string[]): Promise<Array<{ url: string; lat: number | null; lng: number | null }>> {
+  const out: Array<{ url: string; lat: number | null; lng: number | null }> = [];
+  const seen = new Set<string>();
+  for (const url of links) {
+    if (!isMapsLink(url)) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const coords = await resolveGoogleMapsUrl(url);
+    out.push({
+      url,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
+    });
+    await delayMs(80);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
 
 interface DocContent {
   title: string;

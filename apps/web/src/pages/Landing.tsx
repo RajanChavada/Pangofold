@@ -6,16 +6,21 @@ import { Link } from "react-router";
 import { MapPin, FileText, Sparkles, ArrowRight, FolderOpen } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
-async function extractFnError(err: any): Promise<string> {
-  const fallback = err?.message || "Unknown error";
+async function extractFnError(err: unknown): Promise<string> {
+  const fallback =
+    err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+      ? (err as { message: string }).message
+      : "Unknown error";
   try {
-    const ctx = err?.context;
+    const ctx =
+      err && typeof err === "object" && "context" in err ? (err as { context: unknown }).context : undefined;
     if (ctx instanceof Response) {
-      const body = await ctx.json();
+      const body = (await ctx.json()) as { error?: string; details?: string; message?: string };
       return body?.error || body?.details || body?.message || fallback;
     }
     if (ctx && typeof ctx === "object") {
-      return ctx.error || ctx.details || ctx.message || fallback;
+      const o = ctx as { error?: string; details?: string; message?: string };
+      return o.error || o.details || o.message || fallback;
     }
   } catch { /* ignore */ }
   return fallback;
