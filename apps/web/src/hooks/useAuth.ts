@@ -19,6 +19,10 @@ export function useAuth() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
+
+      if (session?.provider_token) {
+        sessionStorage.setItem("google_provider_token", session.provider_token);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -39,6 +43,7 @@ export function useAuth() {
   };
 
   const signOut = async () => {
+    sessionStorage.removeItem("google_provider_token");
     await supabase.auth.signOut();
   };
 
