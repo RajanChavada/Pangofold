@@ -14,7 +14,8 @@ interface UseTripResult {
   trip: Trip | null;
   loading: boolean;
   error: string | null;
-  refetch: () => Promise<void>;
+  /** Reload trip data. Use silent mode to avoid full-page loading (e.g. after enrich). */
+  refetch: (options?: { silent?: boolean }) => Promise<void>;
   toggleItemChecked: (itemId: string, checked: boolean) => Promise<void>;
   updateTripMeta: (patch: { phase?: Trip["phase"]; defaultSplitCount?: number }) => Promise<void>;
 }
@@ -47,10 +48,13 @@ export function useTrip(tripId: string | undefined): UseTripResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTrip = useCallback(async () => {
+  const fetchTrip = useCallback(async (options?: { silent?: boolean }) => {
     if (!tripId) return;
-    setLoading(true);
-    setError(null);
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const { data: tripRow, error: tripErr } = await supabase
@@ -168,13 +172,17 @@ export function useTrip(tripId: string | undefined): UseTripResult {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load trip");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [tripId]);
 
   useEffect(() => {
-    fetchTrip();
+    void fetchTrip();
   }, [fetchTrip]);
+
+  const refetchQuiet = useCallback(() => fetchTrip({ silent: true }), [fetchTrip]);
 
   const toggleItemChecked = useCallback(async (itemId: string, checked: boolean) => {
     await supabase
@@ -212,7 +220,7 @@ export function useTrip(tripId: string | undefined): UseTripResult {
     [tripId],
   );
 
-  return { trip, loading, error, refetch: fetchTrip, toggleItemChecked, updateTripMeta };
+  return { trip, loading, error, refetch: refetchQuiet, toggleItemChecked, updateTripMeta };
 }
 
 export function useTripBySlug(slug: string | undefined): UseTripResult {

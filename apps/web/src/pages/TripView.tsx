@@ -32,6 +32,7 @@ export function TripView() {
   const [journalItemId, setJournalItemId] = useState<string | null>(null);
   const [journalDefaultTitle, setJournalDefaultTitle] = useState("");
   const [enriching, setEnriching] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
   const useMock = !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
@@ -47,17 +48,33 @@ export function TripView() {
 
   const handleEnrich = useCallback(async () => {
     if (!dbTrip || useMock) return;
+    setEnrichMessage(null);
     setEnriching(true);
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session?.user) return;
-      const { error: fnErr } = await supabase.functions.invoke("enrich-places", {
+      if (!session?.user) {
+        setEnrichMessage("Sign in required to enrich.");
+        return;
+      }
+      const { data, error: fnErr } = await supabase.functions.invoke("enrich-places", {
         body: { tripId: dbTrip.id, userId: session.user.id },
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
-      if (!fnErr) await refetch();
+      if (fnErr) {
+        setEnrichMessage(fnErr.message ?? "Enrich failed. Check the function logs.");
+        return;
+      }
+      await refetch();
+      const n = data && typeof data === "object" && "enriched" in data ? Number((data as { enriched: unknown }).enriched) : NaN;
+      setEnrichMessage(
+        Number.isFinite(n)
+          ? n > 0
+            ? `Linked ${n} place${n === 1 ? "" : "s"} from Google.`
+            : "No new places to link (already enriched or short names)."
+          : "Enrichment finished.",
+      );
     } finally {
       setEnriching(false);
     }
@@ -135,15 +152,30 @@ export function TripView() {
 
         {!useMock && (
           <div className="px-5 mb-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void handleEnrich()}
-              disabled={enriching}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4" />
-              {enriching ? "Enriching places…" : "Enrich places (Google)"}
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => void handleEnrich()}
+                disabled={enriching}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer w-fit"
+              >
+                <Sparkles className="w-4 h-4" />
+                {enriching ? "Enriching places…" : "Enrich places (Google)"}
+              </button>
+              {enrichMessage && (
+                <p
+                  className={`text-sm ${
+                    enrichMessage.startsWith("Linked") || enrichMessage.endsWith("finished.")
+                      ? "text-emerald-700"
+                      : enrichMessage.includes("No new places")
+                        ? "text-text-muted"
+                        : "text-amber-800"
+                  }`}
+                >
+                  {enrichMessage}
+                </p>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => openLog(null, "New memory")}
