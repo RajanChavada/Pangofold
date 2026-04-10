@@ -17,13 +17,9 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const serviceKeyEnv = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const isServiceRole = Boolean(serviceKeyEnv && authHeader === `Bearer ${serviceKeyEnv}`);
 
     let body: { tripId?: string; userId?: string };
     try {
@@ -52,17 +48,30 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const serviceKey = serviceKeyEnv;
 
-    const authClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authErr } = await authClient.auth.getUser();
-    if (authErr || !user || user.id !== userId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    let authorizedUserId: string;
+
+    if (isServiceRole) {
+      authorizedUserId = userId;
+    } else {
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Missing Authorization" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const authClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: authErr } = await authClient.auth.getUser();
+      if (authErr || !user || user.id !== userId) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      authorizedUserId = user.id;
     }
 
     const supabase = createClient(supabaseUrl, serviceKey);
@@ -80,12 +89,19 @@ serve(async (req) => {
       });
     }
 
-    const isOwner = trip.owner_id === user.id;
+    if (isServiceRole && trip.owner_id !== userId) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const isOwner = trip.owner_id === authorizedUserId;
     const { data: memberRow } = await supabase
       .from("trip_members")
       .select("id")
       .eq("trip_id", tripId)
-      .eq("user_id", user.id)
+      .eq("user_id", authorizedUserId)
       .maybeSingle();
 
     if (!isOwner && !memberRow) {

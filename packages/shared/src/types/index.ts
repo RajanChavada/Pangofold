@@ -16,6 +16,7 @@ export type {
   TripMember,
   TripMemberRole,
   TripReportPayload,
+  SettlementTransfer,
   PersonTripStats,
   JournalSplitMode,
   SuperlativeId,

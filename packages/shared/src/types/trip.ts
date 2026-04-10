@@ -163,6 +163,12 @@ export interface PersonTripStats {
 
 export type SuperlativeId = "foodie" | "highRoller" | "historian" | "navigator";
 
+export interface SettlementTransfer {
+  from: string;
+  to: string;
+  amountCents: number;
+}
+
 export interface TripReportPayload {
   generatedAt: string;
   spendByCategory: Record<JournalSpendingCategory | "uncategorized", number>;
@@ -175,4 +181,6 @@ export interface TripReportPayload {
   perPerson: PersonTripStats[];
   /** Derived titles; values are display names or null if no data / tie to empty. */
   superlatives: Record<SuperlativeId, string | null>;
+  /** Suggested settlements to clear group balances (see computeSettlement). */
+  settlement: SettlementTransfer[];
 }

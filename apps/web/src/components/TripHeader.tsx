@@ -26,6 +26,8 @@ interface TripHeaderProps {
   onFinishTrip?: () => void;
   /** Sets phase back to active so the owner can edit and finish again later. */
   onReopenTrip?: () => void;
+  /** Planning → active (owner). */
+  onStartTrip?: () => void;
 }
 
 function formatDateRange(start: string, end: string): string {
@@ -44,6 +46,7 @@ export function TripHeader({
   showPhaseBanner = false,
   onFinishTrip,
   onReopenTrip,
+  onStartTrip,
 }: TripHeaderProps) {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
@@ -73,8 +76,10 @@ export function TripHeader({
     }
   };
 
+  const dbPhase = trip.phase ?? "planning";
   const showReopen = Boolean(onReopenTrip && trip.phase === "completed");
   const showFinishCta = Boolean(onFinishTrip && trip.phase !== "completed");
+  const showStartTrip = Boolean(onStartTrip && (dbPhase === "planning" || !trip.phase));
 
   return (
     <div className="relative">
@@ -110,6 +115,16 @@ export function TripHeader({
             onReopenTrip={onReopenTrip}
             showReopen={showReopen}
           />
+          {showStartTrip && onStartTrip && (
+            <button
+              type="button"
+              onClick={onStartTrip}
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-sky-600 text-white font-semibold text-sm shadow-md hover:bg-sky-700 cursor-pointer"
+            >
+              <Calendar className="w-5 h-5 shrink-0" />
+              Start trip
+            </button>
+          )}
           {showFinishCta && onFinishTrip && (
             <div className="space-y-1.5">
               <button

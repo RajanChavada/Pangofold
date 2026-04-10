@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { toPng } from "html-to-image";
 import {
   ArrowLeft,
   MapPin,
@@ -62,6 +63,34 @@ export function TripReport() {
   const { trip, loading, error } = useTrip(id);
   const { entries, loading: jLoading } = useJournal(id);
   const [saving, setSaving] = useState(false);
+  const [canView, setCanView] = useState(false);
+  const [memberChecked, setMemberChecked] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const shareCardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!trip || !user) {
+      setCanView(false);
+      setMemberChecked(false);
+      return;
+    }
+    if (trip.ownerId === user.id) {
+      setCanView(true);
+      setMemberChecked(true);
+      return;
+    }
+    setMemberChecked(false);
+    void supabase
+      .from("trip_members")
+      .select("id")
+      .eq("trip_id", trip.id)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setCanView(Boolean(data));
+        setMemberChecked(true);
+      });
+  }, [trip, user]);
 
   const payload = useMemo(() => {
     if (!trip) return null;
@@ -108,10 +137,29 @@ export function TripReport() {
     );
   }
 
-  if (user?.id !== trip.ownerId) {
+  if (!user) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-4">
-        <p className="text-text-muted">Only the trip owner can view this report.</p>
+        <p className="text-text-muted">Sign in to view this trip report.</p>
+        <Link to="/dashboard" className="text-primary font-medium">
+          Back to trips
+        </Link>
+      </div>
+    );
+  }
+
+  if (user.id !== trip.ownerId && !memberChecked) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-4">
+        <p className="text-text-muted">Only the owner or invited travelers can view this report.</p>
         <button type="button" onClick={() => navigate(`/trip/${trip.id}`)} className="text-primary font-medium">
           Go to trip
         </button>
@@ -121,20 +169,70 @@ export function TripReport() {
 
   if (!payload) return null;
 
+  const handleExportPng = async () => {
+    const el = shareCardRef.current;
+    if (!el) return;
+    setExporting(true);
+    try {
+      const dataUrl = await toPng(el, { pixelRatio: 2, cacheBust: true });
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `pangofold-wrapped-${trip.id.slice(0, 8)}.png`;
+      a.click();
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-dvh bg-surface pb-12">
       <div className="max-w-lg mx-auto px-5 pt-6">
         <button
           type="button"
-          onClick={() => navigate(`/trip/${trip.id}`)}
+          onClick={() => navigate(`/trip/${trip.id}?view=itinerary`)}
           className="flex items-center gap-2 text-text-muted hover:text-text mb-6"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back
+          Back to trip
         </button>
 
-        <h1 className="text-2xl font-bold tracking-tight">{trip.title}</h1>
-        <p className="text-sm text-text-muted mt-1">Pangofold Wrapped — post-trip story</p>
+        <div
+          ref={shareCardRef}
+          className="rounded-3xl overflow-hidden border border-border bg-gradient-to-b from-violet-950 to-slate-950 text-white p-6 shadow-xl aspect-[9/16] max-h-[min(90vh,640px)] flex flex-col justify-between"
+        >
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-violet-200/90">Pangofold Wrapped</p>
+            <h1 className="text-2xl font-bold tracking-tight mt-2">{trip.title}</h1>
+            {trip.startDate && trip.endDate && (
+              <p className="text-sm text-violet-100/80 mt-1">
+                {trip.startDate} → {trip.endDate}
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <p className="text-4xl font-black tabular-nums">
+              {formatMoney(payload.totalSpendCents)}
+            </p>
+            <p className="text-sm text-violet-100/90">Total logged spend</p>
+            {payload.bestRated && (
+              <p className="text-sm pt-2 border-t border-white/10">
+                Best moment: <strong>{payload.bestRated.title}</strong> ({payload.bestRated.rating}/5)
+              </p>
+            )}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void handleExportPng()}
+          disabled={exporting}
+          className="mt-4 w-full py-3 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+        >
+          {exporting ? "Saving image…" : "Download story card (PNG)"}
+        </button>
+
+        <h1 className="text-2xl font-bold tracking-tight mt-10">{trip.title}</h1>
+        <p className="text-sm text-text-muted mt-1">Full report</p>
 
         <div className="mt-6 space-y-4">
           <section className="bg-gradient-to-br from-violet-600/10 to-amber-500/10 rounded-2xl border border-border p-5 shadow-sm">
@@ -179,6 +277,29 @@ export function TripReport() {
                       {formatMoney(p.attributedSpendCents)} · {p.logCount} logs · {p.photoCount} photos · {p.foodLogCount}{" "}
                       food
                     </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {payload.settlement.length > 0 && (
+            <section className="bg-surface-card rounded-2xl border border-border p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="w-5 h-5 text-emerald-600" />
+                <h2 className="font-semibold">Who owes who</h2>
+              </div>
+              <p className="text-xs text-text-muted mb-3">
+                Approximate settlements from equal / group splits and named payers. Add everyone as loggers for best
+                results.
+              </p>
+              <ul className="space-y-2 text-sm">
+                {payload.settlement.map((s, i) => (
+                  <li key={i} className="flex justify-between gap-2 border-b border-border/40 pb-2 last:border-0">
+                    <span>
+                      <strong>{s.from}</strong> → <strong>{s.to}</strong>
+                    </span>
+                    <span className="font-medium">{formatMoney(s.amountCents)}</span>
                   </li>
                 ))}
               </ul>
@@ -318,14 +439,16 @@ export function TripReport() {
             </div>
           </section>
 
-          <button
-            type="button"
-            onClick={() => void handleSaveSnapshot()}
-            disabled={saving}
-            className="w-full py-3 rounded-xl bg-primary/10 text-primary font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-          >
-            {saving ? "Saving…" : "Save snapshot to history"}
-          </button>
+          {user.id === trip.ownerId && (
+            <button
+              type="button"
+              onClick={() => void handleSaveSnapshot()}
+              disabled={saving}
+              className="w-full py-3 rounded-xl bg-primary/10 text-primary font-medium hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving…" : "Save snapshot to history"}
+            </button>
+          )}
         </div>
       </div>
     </div>

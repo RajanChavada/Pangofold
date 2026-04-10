@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams, useMatch, useSearchParams, useNavigate } from "react-router";
-import { Utensils, Compass, ListChecks, List, MapPin, Sparkles } from "lucide-react";
+import { Utensils, Compass, ListChecks, List, MapPin, Sparkles, Plus } from "lucide-react";
 import { useTrip, useScheduleConflicts } from "../hooks/useTrip";
 import { useJournal } from "../hooks/useJournal";
+import { useTripSpend } from "../hooks/useTripSpend";
 import { useAuth } from "../hooks/useAuth";
 import { getGuestName, setGuestName } from "../hooks/useGuestIdentity";
 import { TripHeader } from "../components/TripHeader";
@@ -54,6 +55,8 @@ export function TripView() {
   const { trip: dbTrip, loading, error, toggleItemChecked, refetch, updateTripMeta } = useTrip(id);
   const { entries, createEntry, refetch: refetchJournal } = useJournal(id);
 
+  const [isMember, setIsMember] = useState(false);
+
   const [destIndex, setDestIndex] = useState(0);
   const [dayIndex, setDayIndex] = useState(0);
   const [checklistMode, setChecklistMode] = useState(false);
@@ -69,6 +72,24 @@ export function TripView() {
 
   const [collabVerifyError, setCollabVerifyError] = useState<string | null>(null);
   const [journalActionError, setJournalActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id || !dbTrip?.id) {
+      setIsMember(false);
+      return;
+    }
+    if (dbTrip.ownerId === user.id) {
+      setIsMember(false);
+      return;
+    }
+    void supabase
+      .from("trip_members")
+      .select("id")
+      .eq("trip_id", dbTrip.id)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => setIsMember(Boolean(data)));
+  }, [user?.id, dbTrip?.id, dbTrip?.ownerId]);
 
   useEffect(() => {
     if (!isCollab) {
@@ -113,6 +134,17 @@ export function TripView() {
   const destForHooks = trip?.destinations[destIndex];
   const dayForHooks = destForHooks?.days[dayIndex];
   const conflicts = useScheduleConflicts(destForHooks, dayForHooks);
+  const { tripTotalCents, dayTotalCents } = useTripSpend(entries, dayForHooks?.date);
+
+  useEffect(() => {
+    if (!dbTrip || loading || isCollab || authLoading) return;
+    if (dbTrip.phase !== "completed") return;
+    if (!user?.id) return;
+    const allowed = dbTrip.ownerId === user.id || isMember;
+    if (!allowed) return;
+    if (searchParams.get("view") === "itinerary") return;
+    navigate(`/trip/${dbTrip.id}/report`, { replace: true });
+  }, [dbTrip, loading, isCollab, authLoading, user?.id, isMember, navigate, searchParams]);
 
   const openLog = useCallback((itemId: string | null, defaultTitle: string) => {
     setJournalItemId(itemId);
@@ -186,6 +218,11 @@ export function TripView() {
   }, [id, navigate, updateTripMeta]);
 
   const handleReopenTrip = useCallback(async () => {
+    if (!id) return;
+    await updateTripMeta({ phase: "active" });
+  }, [id, updateTripMeta]);
+
+  const handleStartTrip = useCallback(async () => {
     if (!id) return;
     await updateTripMeta({ phase: "active" });
   }, [id, updateTripMeta]);
@@ -272,6 +309,10 @@ export function TripView() {
   const split = trip.defaultSplitCount ?? 1;
   const canJournal = !isCollab || Boolean(guestName && tokenFromUrl);
   const readOnlyTrip = isCollab;
+  const dbPhase = trip.phase ?? "planning";
+  const showActiveSpendStrip = !useMock && !isCollab && dbPhase === "active";
+  const showJournalFab =
+    !useMock && !isCollab && dbPhase === "active" && canJournal && !readOnlyTrip;
 
   return (
     <div className="min-h-dvh bg-surface pb-8">
@@ -347,7 +388,35 @@ export function TripView() {
           showPhaseBanner={!useMock && !isCollab}
           onFinishTrip={showFinishTripCta ? () => void handleFinishTrip() : undefined}
           onReopenTrip={showReopenTripCta ? () => void handleReopenTrip() : undefined}
+          onStartTrip={
+            !useMock && !isCollab && isOwner && (trip.phase ?? "planning") === "planning"
+              ? () => void handleStartTrip()
+              : undefined
+          }
         />
+
+        {showActiveSpendStrip && (
+          <div className="px-5 mb-3 sticky top-0 z-30 bg-surface/95 backdrop-blur border-b border-border py-3 -mx-0">
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-wide">Running spend</p>
+            <p className="text-lg font-bold text-text mt-0.5">
+              {(tripTotalCents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })}{" "}
+              <span className="text-sm font-normal text-text-muted">
+                trip
+                {day?.date && (
+                  <>
+                    {" "}
+                    · Day{" "}
+                    {(dayTotalCents / 100).toLocaleString("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                    })}{" "}
+                    today
+                  </>
+                )}
+              </span>
+            </p>
+          </div>
+        )}
 
         {!useMock && !isCollab && !authLoading && !user && (
           <div className="px-5 mb-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-sm py-3">
@@ -569,6 +638,17 @@ export function TripView() {
               ))}
             </div>
           </div>
+        )}
+
+        {showJournalFab && (
+          <button
+            type="button"
+            onClick={() => openLog(null, "New memory")}
+            className="fixed bottom-6 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 cursor-pointer"
+            aria-label="Log something new"
+          >
+            <Plus className="w-7 h-7" />
+          </button>
         )}
 
         {!useMock && entries.length > 0 && (

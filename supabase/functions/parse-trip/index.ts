@@ -22,9 +22,74 @@ function normKey(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function normalizeDocUrl(url: string): string {
+function extractGoogleDocId(url: string): string | null {
   const m = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : url.trim();
+  return m ? m[1] : null;
+}
+
+/** Canonical form for trips.source_doc_url — matches unique (owner_id, source_doc_url). */
+function canonicalGoogleDocUrl(input: string | null | undefined): string | null {
+  const raw = (input ?? "").trim();
+  if (!raw) return null;
+  const id = extractGoogleDocId(raw);
+  if (id) return `https://docs.google.com/document/d/${id}/edit`;
+  return raw;
+}
+
+async function findTripBySourceDoc(
+  supabase: ReturnType<typeof createClient>,
+  ownerId: string,
+  docInput: string,
+): Promise<{ id: string; share_slug: string } | null> {
+  const canonical = canonicalGoogleDocUrl(docInput);
+  if (!canonical) return null;
+
+  const { data: exact } = await supabase
+    .from("trips")
+    .select("id, share_slug")
+    .eq("owner_id", ownerId)
+    .eq("source_doc_url", canonical)
+    .maybeSingle();
+
+  if (exact) return exact;
+
+  const did = extractGoogleDocId(docInput);
+  if (!did) return null;
+
+  const { data: candidates } = await supabase
+    .from("trips")
+    .select("id, share_slug, source_doc_url")
+    .eq("owner_id", ownerId)
+    .not("source_doc_url", "is", null);
+
+  const match = candidates?.find(
+    (t) => extractGoogleDocId(String(t.source_doc_url ?? "")) === did,
+  );
+  return match ? { id: match.id, share_slug: match.share_slug } : null;
+}
+
+async function triggerEnrichPlaces(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  tripId: string,
+  userId: string,
+): Promise<void> {
+  const base = supabaseUrl.replace(/\/$/, "");
+  try {
+    const res = await fetch(`${base}/functions/v1/enrich-places`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tripId, userId }),
+    });
+    if (!res.ok) {
+      console.warn("[parse-trip] enrich-places HTTP", res.status, await res.text());
+    }
+  } catch (e) {
+    console.warn("[parse-trip] enrich-places error", e);
+  }
 }
 
 /** In-memory set for O(1) duplicate detection (avoids trusting the LLM alone). */
@@ -140,19 +205,18 @@ serve(async (req) => {
       }
     }
 
-    const docUrlNorm = typeof docUrl === "string" && docUrl.length > 0 ? docUrl : null;
+    const canonicalDoc =
+      typeof docUrl === "string" && docUrl.trim().length > 0 ? canonicalGoogleDocUrl(docUrl) : null;
     const contentHash = await sha256Hex(textContent);
 
     let tripId: string;
     let shareSlug: string;
 
-    if (docUrlNorm) {
-      const { data: existing } = await supabase
-        .from("trips")
-        .select("id, share_slug")
-        .eq("owner_id", userId)
-        .eq("source_doc_url", docUrlNorm)
-        .maybeSingle();
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    if (canonicalDoc) {
+      const existing = await findTripBySourceDoc(supabase, userId, String(docUrl));
 
       if (existing) {
         const { error: delErr } = await supabase.from("destinations").delete().eq("trip_id", existing.id);
@@ -167,6 +231,7 @@ serve(async (req) => {
             raw_doc_text: textContent,
             raw_doc_content_hash: contentHash,
             cover_image_url: imageUrls?.[0] || null,
+            source_doc_url: canonicalDoc,
           })
           .eq("id", existing.id)
           .select()
@@ -182,7 +247,7 @@ serve(async (req) => {
             title: tripJson.title || title,
             start_date: tripJson.startDate || null,
             end_date: tripJson.endDate || null,
-            source_doc_url: docUrlNorm,
+            source_doc_url: canonicalDoc,
             owner_id: userId,
             raw_doc_text: textContent,
             raw_doc_content_hash: contentHash,
@@ -297,6 +362,10 @@ serve(async (req) => {
       }
     }
 
+    if (serviceRoleKey) {
+      void triggerEnrichPlaces(supabaseUrl, serviceRoleKey, tripId, userId);
+    }
+
     return new Response(
       JSON.stringify({ tripId, shareSlug, parsed: tripJson }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -326,7 +395,10 @@ function promoteStructuredFoodActivities(
   tripJson: Record<string, unknown>,
 ): void {
   const sections = structured?.sections as
-    | Array<{ items?: Array<{ text?: string; subSection?: string; link?: string; cost?: string }> }>
+    | Array<{
+        title?: string;
+        items?: Array<{ text?: string; subSection?: string; link?: string; cost?: string }>;
+      }>
     | undefined;
   if (!sections?.length) return;
 
@@ -347,7 +419,15 @@ function promoteStructuredFoodActivities(
     activities.map((a) => dedupeKey(String(a.name ?? ""), a.link as string | undefined)),
   );
 
+  const SECTION_FOOD = /food|meal|dining|restaurant|eat|coffee|drink|bakery|bar|cafe|lunch|dinner|brunch|breakfast/i;
+  const SECTION_ACT =
+    /activity|sightseeing|hike|attraction|museum|park|tour|excursion|things to do|to do/i;
+
   for (const sec of sections) {
+    const secTitle = String(sec.title || "").trim();
+    const sectionIsFood = SECTION_FOOD.test(secTitle);
+    const sectionIsAct = SECTION_ACT.test(secTitle);
+
     for (const raw of sec.items || []) {
       const text = String(raw.text || "").trim();
       if (text.length < 2) continue;
@@ -355,8 +435,16 @@ function promoteStructuredFoodActivities(
       const link = raw.link as string | undefined;
       const cost = raw.cost as string | undefined;
 
-      const isFood = FOOD_SUB_RE.test(sub) || (!sub && FOOD_TITLE_RE.test(text));
-      const isAct = ACT_SUB_RE.test(sub) || (!sub && ACT_TITLE_RE.test(text));
+      const isFood =
+        sectionIsFood ||
+        FOOD_SUB_RE.test(sub) ||
+        (!sub && FOOD_TITLE_RE.test(text)) ||
+        /^food\s*:/i.test(text);
+      const isAct =
+        sectionIsAct ||
+        ACT_SUB_RE.test(sub) ||
+        (!sub && ACT_TITLE_RE.test(text)) ||
+        /^activity\s*:/i.test(text);
 
       if (isFood && !isAct) {
         const k = dedupeKey(text, link);
@@ -530,8 +618,10 @@ YOUR JOB: Convert this into a structured trip JSON. You handle the SEMANTICS (wh
 - Determine which sections are days/destinations/logistics
 - Categorize day items: food, activity, transport, accommodation, other
 - CRITICAL: Every restaurant, meal, cafe, or dining stop must appear in BOTH (1) the correct day's items with category "food" AND (2) the destination's "foodSpots" array (name, type, notes, link, priceRange). Do not put meals only in days without a matching foodSpots entry.
+- NESTED LISTS: Many docs put restaurants ONLY as sub-bullets under a DAY heading (e.g. "Day 3" → "Food:" → nested bullets). You MUST still extract EVERY nested food line into foodSpots and into the matching day's items — do not skip nested bullets.
 - CRITICAL: Every hike, park, attraction, excursion, or sightseeing block must appear in BOTH (1) day items with category "activity" AND (2) the destination's "activities" array (name, notes, cost, link, location).
 - If a section has a sub-heading "Food" (or similar), EVERY bullet under that sub-heading must be category "food" and must appear in foodSpots.
+- If a section title or day block contains "Food", "Meals", "Where to eat", "Dinner", or "Lunch" as a subsection, every bullet under it is food (not "other").
 - Transport and accommodation stay as day items (or hotel object); flights/car rental use transport or accommodation categories.
 - Identify hotels/accommodation from key-values or items mentioning addresses
 - Preserve ALL links, times, costs, and isChecked values exactly as given
@@ -943,11 +1033,18 @@ async function handleAppendResync(
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  if (!trip.source_doc_url || normalizeDocUrl(String(trip.source_doc_url)) !== normalizeDocUrl(docUrl)) {
+  const tripDocId = extractGoogleDocId(String(trip.source_doc_url ?? ""));
+  const reqDocId = extractGoogleDocId(docUrl);
+  if (!trip.source_doc_url || !tripDocId || !reqDocId || tripDocId !== reqDocId) {
     return new Response(
       JSON.stringify({ error: "Use the same Google Doc URL this trip was created from." }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
+  }
+
+  const canonDoc = canonicalGoogleDocUrl(docUrl);
+  if (canonDoc && canonDoc !== String(trip.source_doc_url ?? "")) {
+    await supabase.from("trips").update({ source_doc_url: canonDoc }).eq("id", tripId);
   }
 
   const newHash = await sha256Hex(textContent);
@@ -1041,6 +1138,12 @@ async function handleAppendResync(
   await supabase.from("trips").update(tripPatch).eq("id", tripId);
 
   const { data: slugRow } = await supabase.from("trips").select("share_slug").eq("id", tripId).single();
+
+  const supabaseUrlAppend = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceRoleKeyAppend = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (serviceRoleKeyAppend) {
+    void triggerEnrichPlaces(supabaseUrlAppend, serviceRoleKeyAppend, tripId, userId);
+  }
 
   return new Response(
     JSON.stringify({

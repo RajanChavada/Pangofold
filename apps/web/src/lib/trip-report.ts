@@ -7,6 +7,7 @@ import type {
   PersonTripStats,
   SuperlativeId,
 } from "@pangofold/shared";
+import { computeSettlement } from "./settlement";
 
 function categoryFromItem(cat: string | undefined): JournalSpendingCategory | "uncategorized" {
   const c = (cat || "").toLowerCase();
@@ -224,6 +225,8 @@ export function buildTripReportPayload(trip: Trip, entries: JournalEntry[]): Tri
     navigator: pickTopName(navigatorScores),
   };
 
+  const settlement = computeSettlement(entries);
+
   return {
     generatedAt: new Date().toISOString(),
     spendByCategory,
@@ -234,5 +237,6 @@ export function buildTripReportPayload(trip: Trip, entries: JournalEntry[]): Tri
     topPhotoPaths,
     perPerson,
     superlatives,
+    settlement,
   };
 }
