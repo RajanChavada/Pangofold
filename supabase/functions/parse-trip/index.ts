@@ -6,7 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
+const ANTHROPIC_AUTH_TOKEN = Deno.env.get("ANTHROPIC_AUTH_TOKEN") ?? "";
+const ANTHROPIC_BASE_URL = Deno.env.get("ANTHROPIC_BASE_URL") ?? "https://api.z.ai/api/anthropic";
+const MODEL = Deno.env.get("MODEL") ?? "glm-4.5-air";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -14,31 +16,38 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing auth header" }), {
-        status: 401,
+    const { title, textContent, links, imageUrls, docUrl, userId, structured } = await req.json();
+
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "Missing userId" }), {
+        status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      { global: { headers: { Authorization: authHeader } } },
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const tripJson = await parseWithAI(title, textContent, links, structured);
+
+    // Validate and fix required fields
+    if (!tripJson.title) tripJson.title = title;
+    for (const dest of tripJson.destinations || []) {
+      if (!dest.name) dest.name = title.replace(/trip/i, "").trim() || "Destination";
+      for (const day of dest.days || []) {
+        for (const item of day.items || []) {
+          if (!item.title) item.title = "Untitled item";
+        }
+      }
+      for (const spot of dest.foodSpots || []) {
+        if (!spot.name) spot.name = "Unnamed spot";
+      }
+      for (const act of dest.activities || []) {
+        if (!act.name) act.name = "Unnamed activity";
+      }
     }
-
-    const { title, textContent, links, imageUrls, docUrl } = await req.json();
-
-    const tripJson = await parseWithAI(title, textContent, links);
 
     const { data: trip, error: tripError } = await supabase
       .from("trips")
@@ -47,7 +56,7 @@ serve(async (req) => {
         start_date: tripJson.startDate || null,
         end_date: tripJson.endDate || null,
         source_doc_url: docUrl,
-        owner_id: user.id,
+        owner_id: userId,
         raw_doc_text: textContent,
         cover_image_url: imageUrls?.[0] || null,
       })
@@ -133,7 +142,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ tripId: trip.id, parsed: tripJson }),
+      JSON.stringify({ tripId: trip.id, shareSlug: trip.share_slug, parsed: tripJson }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
@@ -148,94 +157,151 @@ async function parseWithAI(
   title: string,
   textContent: string,
   links: string[],
+  structured?: any,
 ) {
-  const systemPrompt = `You parse messy Google Doc trip plans into structured JSON. Handle:
-- Bullet lists, incomplete sentences, mixed languages
-- Prices in various formats ($15, 8.5/person)
-- Abbreviations (DT=downtown, MTL=Montreal)
-- Strikethrough items (mark isChecked: true)
-- Checkbox items
+  const structuredSection = structured
+    ? `\n\nPATTERN ANALYSIS (auto-detected structure from the document — use this as your primary source):\n${JSON.stringify(structured, null, 2)}`
+    : "";
 
-Categorize each item: food, activity, transport, accommodation, or other.
-Group by destination, then by day when possible.
-Extract food spots into a separate array per destination.
-Extract activities into a separate array per destination.`;
+  const systemPrompt = `You are a trip plan parser. You receive a pattern analysis AND raw text from a Google Doc.
 
-  const userPrompt = `Parse this trip plan:
+The pattern analysis was auto-detected and contains:
+- "sections": numbered/labeled document sections with their items, links, times, costs, checked status, and sub-section labels
+- "keyValues": key-value pairs found outside sections (expenses, booking info, addresses, etc.)
+- "linkMap": which URLs are associated with which items
+- "orphanItems": content items found outside any section
+
+YOUR JOB: Convert this into a structured trip JSON. You handle the SEMANTICS (what things mean):
+- Determine which sections are days/destinations/logistics
+- Categorize items: food, activity, transport, accommodation, other
+- Identify hotels/accommodation from key-values or items mentioning addresses
+- Group food items (sub-section labeled "Food" or food-related items) into foodSpots
+- Preserve ALL links, times, costs, and isChecked values exactly as given
+- Empty sections should still appear as empty days
+- Orphan items go into the destination's activities array
+- Key-value pairs with costs are expenses/bookings — incorporate them
+
+Respond with ONLY the JSON object. No thinking, no explanation, no markdown.`;
+
+  const userPrompt = `Parse this trip plan.
 
 Title: ${title}
+${structuredSection}
 
-Content:
-${textContent.slice(0, 12000)}
+RAW TEXT (fallback — use pattern analysis above as primary source):
+${textContent.slice(0, 10000)}
 
-Links found: ${links.slice(0, 20).join(", ")}
+Links found: ${links.slice(0, 30).join(", ")}
 
-Return JSON matching this exact schema:
-{
-  "title": "string",
-  "startDate": "YYYY-MM-DD or null",
-  "endDate": "YYYY-MM-DD or null",
-  "destinations": [{
-    "name": "string",
-    "duration": "string or null",
-    "hotel": { "name": "string", "address": "string or null", "link": "string or null" } | null,
-    "days": [{
-      "dayNumber": 1,
-      "date": "YYYY-MM-DD or null",
-      "items": [{
-        "time": "string or null",
-        "title": "string",
-        "description": "string or null",
-        "category": "food|activity|transport|accommodation|other",
-        "location": "string or null",
-        "link": "string or null",
-        "cost": "string or null",
-        "isChecked": false
-      }]
-    }],
-    "foodSpots": [{
-      "name": "string",
-      "type": "restaurant|cafe|street|bakery|bar",
-      "notes": "string or null",
-      "link": "string or null",
-      "priceRange": "string or null"
-    }],
-    "activities": [{
-      "name": "string",
-      "notes": "string or null",
-      "cost": "string or null",
-      "link": "string or null",
-      "location": "string or null"
-    }]
-  }]
-}`;
+REQUIRED JSON structure (destinations.name MUST be a real city/region name, NEVER null):
+{"title":"string","startDate":"YYYY-MM-DD or null","endDate":"YYYY-MM-DD or null","destinations":[{"name":"REQUIRED city/region name","duration":"string or null","hotel":{"name":"string or null","address":"string or null","link":"string or null"},"days":[{"dayNumber":1,"date":"YYYY-MM-DD or null","items":[{"time":"string or null","title":"REQUIRED string","description":"string or null","category":"food|activity|transport|accommodation|other","location":"string or null","link":"string or null","cost":"string or null","isChecked":false}]}],"foodSpots":[{"name":"REQUIRED string","type":"restaurant|cafe|street|bakery|bar","notes":"string or null","link":"string or null","priceRange":"string or null"}],"activities":[{"name":"REQUIRED string","notes":"string or null","cost":"string or null","link":"string or null","location":"string or null"}]}]}
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+If you cannot determine the destination city, use the title or "Trip Destination" as fallback. NEVER return null for name fields.`;
+
+  const apiUrl = `${ANTHROPIC_BASE_URL}/v1/messages`;
+
+  const res = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "x-api-key": ANTHROPIC_AUTH_TOKEN,
+      "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "gpt-4o",
+      model: MODEL,
+      max_tokens: 16000,
+      system: systemPrompt,
       messages: [
-        { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      response_format: { type: "json_object" },
       temperature: 0.1,
-      max_tokens: 4096,
     }),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`OpenAI API error: ${res.status} ${errText}`);
+    throw new Error(`LLM API error: ${res.status} ${errText}`);
   }
 
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("No content in OpenAI response");
+  const textBlock = data.content?.find((b: any) => b.type === "text");
+  if (!textBlock?.text) throw new Error("No content in LLM response");
 
-  return JSON.parse(content);
+  let raw = textBlock.text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+  const json = extractJsonObject(raw);
+  if (!json) {
+    throw new Error("LLM response does not contain a valid JSON object");
+  }
+
+  return JSON.parse(json);
+}
+
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  // JSON was truncated — try to repair by closing open braces/brackets
+  let truncated = text.slice(start);
+  if (inString) truncated += '"';
+
+  const opens = { braces: 0, brackets: 0 };
+  let inStr = false;
+  let esc = false;
+  for (const ch of truncated) {
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") opens.braces++;
+    else if (ch === "}") opens.braces--;
+    else if (ch === "[") opens.brackets++;
+    else if (ch === "]") opens.brackets--;
+  }
+
+  // Remove any trailing comma before closing
+  truncated = truncated.replace(/,\s*$/, "");
+
+  for (let i = 0; i < opens.brackets; i++) truncated += "]";
+  for (let i = 0; i < opens.braces; i++) truncated += "}";
+
+  try {
+    JSON.parse(truncated);
+    return truncated;
+  } catch {
+    return null;
+  }
 }

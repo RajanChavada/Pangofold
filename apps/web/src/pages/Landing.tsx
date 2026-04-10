@@ -1,20 +1,104 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "../hooks/useAuth";
 import { extractGoogleDocId } from "@pangofold/shared";
-import { MapPin, FileText, Sparkles, ArrowRight } from "lucide-react";
+import { Link } from "react-router";
+import { MapPin, FileText, Sparkles, ArrowRight, FolderOpen } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
+async function extractFnError(err: any): Promise<string> {
+  const fallback = err?.message || "Unknown error";
+  try {
+    const ctx = err?.context;
+    if (ctx instanceof Response) {
+      const body = await ctx.json();
+      return body?.error || body?.details || body?.message || fallback;
+    }
+    if (ctx && typeof ctx === "object") {
+      return ctx.error || ctx.details || ctx.message || fallback;
+    }
+  } catch { /* ignore */ }
+  return fallback;
+}
+
 export function Landing() {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const { user, session, loading, signInWithGoogle, signOut } = useAuth();
   const [docUrl, setDocUrl] = useState("");
   const [parsing, setParsing] = useState(false);
+  const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const processDoc = useCallback(async (url: string) => {
+    setDocUrl(url);
+    setError(null);
+    setParsing(true);
+    setStatus("Connecting...");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError("Please sign in first.");
+        return;
+      }
+
+      const providerToken = session.provider_token
+        || sessionStorage.getItem("google_provider_token");
+
+      if (!providerToken) {
+        setError("Google access expired. Please sign out and sign in again.");
+        return;
+      }
+
+      setStatus("Fetching your Google Doc...");
+      const fetchRes = await supabase.functions.invoke("fetch-doc", {
+        body: { docUrl: url, providerToken },
+      });
+
+      console.log("[Pangofold] fetch-doc result:", { data: fetchRes.data, error: fetchRes.error });
+
+      if (fetchRes.error) {
+        const detail = await extractFnError(fetchRes.error);
+        if (detail.includes("401")) {
+          sessionStorage.removeItem("google_provider_token");
+          throw new Error("Google token expired. Please sign out and sign back in, then try again.");
+        }
+        throw new Error(detail);
+      }
+
+      setStatus("AI is reading your trip plan — this can take up to 60 seconds...");
+      const parseRes = await supabase.functions.invoke("parse-trip", {
+        body: { ...fetchRes.data, userId: session.user.id },
+      });
+
+      console.log("[Pangofold] parse-trip result:", { data: parseRes.data, error: parseRes.error });
+
+      if (parseRes.error) {
+        const detail = await extractFnError(parseRes.error);
+        throw new Error(detail);
+      }
+
+      setStatus("Done! Redirecting...");
+      navigate(`/trip/${parseRes.data.tripId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong parsing your doc.");
+    } finally {
+      setParsing(false);
+      setStatus("");
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    if (user && session?.provider_token) {
+      const pending = sessionStorage.getItem("pangofold_pending_doc");
+      if (pending) {
+        sessionStorage.removeItem("pangofold_pending_doc");
+        processDoc(pending);
+      }
+    }
+  }, [user, session, processDoc]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
     const docId = extractGoogleDocId(docUrl);
     if (!docId) {
@@ -22,33 +106,7 @@ export function Landing() {
       return;
     }
 
-    setParsing(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setError("Please sign in first.");
-        setParsing(false);
-        return;
-      }
-
-      const fetchRes = await supabase.functions.invoke("fetch-doc", {
-        body: { docUrl },
-      });
-
-      if (fetchRes.error) throw fetchRes.error;
-
-      const parseRes = await supabase.functions.invoke("parse-trip", {
-        body: fetchRes.data,
-      });
-
-      if (parseRes.error) throw parseRes.error;
-
-      navigate(`/trip/${parseRes.data.tripId}/edit`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong parsing your doc.");
-    } finally {
-      setParsing(false);
-    }
+    await processDoc(docUrl);
   };
 
   return (
@@ -92,12 +150,21 @@ export function Landing() {
                 <p className="text-sm text-text-muted">
                   Signed in as <span className="font-medium text-text">{user.email}</span>
                 </p>
-                <button
-                  onClick={signOut}
-                  className="text-sm text-text-muted hover:text-text transition-colors cursor-pointer"
-                >
-                  Sign out
-                </button>
+                <div className="flex items-center gap-3">
+                  <Link
+                    to="/dashboard"
+                    className="flex items-center gap-1.5 text-sm text-primary hover:text-primary-dark transition-colors"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    My Trips
+                  </Link>
+                  <button
+                    onClick={signOut}
+                    className="text-sm text-text-muted hover:text-text transition-colors cursor-pointer"
+                  >
+                    Sign out
+                  </button>
+                </div>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
@@ -130,7 +197,7 @@ export function Landing() {
                   {parsing ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Parsing your trip...
+                      {status || "Working..."}
                     </>
                   ) : (
                     <>

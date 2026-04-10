@@ -1,7 +1,7 @@
 import { createSupabaseClient } from "@pangofold/shared";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? "";
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn(
@@ -9,7 +9,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createSupabaseClient(
-  supabaseUrl ?? "",
-  supabaseAnonKey ?? "",
-);
+export const supabase = supabaseUrl && supabaseAnonKey
+  ? createSupabaseClient(supabaseUrl, supabaseAnonKey)
+  : createSupabaseClient("https://placeholder.supabase.co", "placeholder");
