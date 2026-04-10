@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { cn } from "../lib/cn";
 import { supabase } from "../lib/supabase";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface TripHeaderProps {
   trip: Trip;
@@ -24,6 +25,7 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const shareUrl = `${window.location.origin}/s/${trip.shareSlug}`;
 
@@ -38,10 +40,10 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete "${trip.title}"? This cannot be undone.`)) return;
     setDeleting(true);
     const { error } = await supabase.from("trips").delete().eq("id", trip.id);
     if (!error) {
+      setDeleteOpen(false);
       navigate("/dashboard");
     } else {
       setDeleting(false);
@@ -50,6 +52,19 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
 
   return (
     <div className="relative">
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete this trip?"
+        description={`“${trip.title}” and all of its destinations, days, and items will be permanently removed. This cannot be undone.`}
+        confirmLabel="Delete trip"
+        cancelLabel="Keep trip"
+        variant="danger"
+        loading={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteOpen(false);
+        }}
+        onConfirm={() => void handleDelete()}
+      />
       {trip.coverImageUrl && (
         <div className="h-48 w-full overflow-hidden rounded-b-3xl">
           <img
@@ -90,7 +105,8 @@ export function TripHeader({ trip, editable = false }: TripHeaderProps) {
             </button>
             {editable && (
               <button
-                onClick={handleDelete}
+                type="button"
+                onClick={() => setDeleteOpen(true)}
                 disabled={deleting}
                 className="p-2 rounded-xl hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors cursor-pointer disabled:opacity-50"
               >

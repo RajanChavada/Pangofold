@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useParams, useNavigate } from "react-router";
 import {
   ArrowLeft,
@@ -30,6 +31,37 @@ export function TripEdit() {
   const [dayIndex, setDayIndex] = useState(0);
   const [saving, setSaving] = useState(false);
   const [editTab, setEditTab] = useState<"days" | "food" | "activities">("days");
+  const [pendingRemove, setPendingRemove] = useState<
+    null | { type: "item" | "food" | "activity"; id: string }
+  >(null);
+  const [removeLoading, setRemoveLoading] = useState(false);
+
+  const confirmRemove = useCallback(async () => {
+    if (!pendingRemove) return;
+    setRemoveLoading(true);
+    try {
+      const { type, id } = pendingRemove;
+      if (type === "item") await supabase.from("itinerary_items").delete().eq("id", id);
+      else if (type === "food") await supabase.from("food_spots").delete().eq("id", id);
+      else await supabase.from("activities").delete().eq("id", id);
+      setPendingRemove(null);
+      await refetch();
+    } finally {
+      setRemoveLoading(false);
+    }
+  }, [pendingRemove, refetch]);
+
+  const handleDeleteItem = useCallback((itemId: string) => {
+    setPendingRemove({ type: "item", id: itemId });
+  }, []);
+
+  const handleDeleteFood = useCallback((foodId: string) => {
+    setPendingRemove({ type: "food", id: foodId });
+  }, []);
+
+  const handleDeleteActivity = useCallback((actId: string) => {
+    setPendingRemove({ type: "activity", id: actId });
+  }, []);
 
   if (loading) {
     return (
@@ -49,24 +81,6 @@ export function TripEdit() {
 
   const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
-
-  const handleDeleteItem = async (itemId: string) => {
-    if (!confirm("Remove this item?")) return;
-    await supabase.from("itinerary_items").delete().eq("id", itemId);
-    await refetch();
-  };
-
-  const handleDeleteFood = async (foodId: string) => {
-    if (!confirm("Remove this food spot?")) return;
-    await supabase.from("food_spots").delete().eq("id", foodId);
-    await refetch();
-  };
-
-  const handleDeleteActivity = async (actId: string) => {
-    if (!confirm("Remove this activity?")) return;
-    await supabase.from("activities").delete().eq("id", actId);
-    await refetch();
-  };
 
   const handleAddItem = async () => {
     if (!day) return;
@@ -121,8 +135,42 @@ export function TripEdit() {
     await supabase.from("activities").update({ [dbField]: value || null }).eq("id", actId);
   };
 
+  const removeDialogCopy =
+    pendingRemove?.type === "item"
+      ? {
+          title: "Remove this item?",
+          description: "It will be removed from this day’s itinerary.",
+          confirm: "Remove item",
+        }
+      : pendingRemove?.type === "food"
+        ? {
+            title: "Remove this food spot?",
+            description: "It will disappear from your Food list for this destination.",
+            confirm: "Remove",
+          }
+        : pendingRemove
+          ? {
+              title: "Remove this activity?",
+              description: "It will disappear from your Activities list for this destination.",
+              confirm: "Remove",
+            }
+          : { title: "", description: "", confirm: "Remove" };
+
   return (
     <div className="min-h-dvh bg-surface pb-8">
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        title={removeDialogCopy.title}
+        description={removeDialogCopy.description}
+        confirmLabel={removeDialogCopy.confirm}
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={removeLoading}
+        onCancel={() => {
+          if (!removeLoading) setPendingRemove(null);
+        }}
+        onConfirm={() => void confirmRemove()}
+      />
       <div className="max-w-lg mx-auto">
         {/* Header */}
         <div className="px-5 pt-6 pb-4">
@@ -297,7 +345,7 @@ function EditItemCard({
 }: {
   item: ItineraryItem;
   onUpdate: (id: string, field: string, value: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => void;
 }) {
   return (
     <div className="bg-surface-card rounded-2xl border border-border p-4 shadow-sm">
@@ -372,7 +420,7 @@ function EditFoodCard({
 }: {
   spot: FoodSpot;
   onUpdate: (id: string, field: string, value: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => void;
 }) {
   return (
     <div className="bg-surface-card rounded-2xl border border-border p-4 shadow-sm">
@@ -433,7 +481,7 @@ function EditActivityCard({
 }: {
   activity: Activity;
   onUpdate: (id: string, field: string, value: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => void;
 }) {
   return (
     <div className="bg-surface-card rounded-2xl border border-border p-4 shadow-sm">

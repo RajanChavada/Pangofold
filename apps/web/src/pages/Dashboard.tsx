@@ -14,6 +14,7 @@ import {
   Plane,
   Trash2,
 } from "lucide-react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 interface TripSummary {
   id: string;
@@ -34,6 +35,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -69,6 +71,7 @@ export function Dashboard() {
     const { error } = await supabase.from("trips").delete().eq("id", id);
     if (!error) {
       setTrips((prev) => prev.filter((t) => t.id !== id));
+      setDeleteTarget(null);
     }
     setDeletingId(null);
   };
@@ -88,6 +91,25 @@ export function Dashboard() {
 
   return (
     <div className="min-h-dvh bg-surface">
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete this trip?"
+        description={
+          deleteTarget
+            ? `“${deleteTarget.title}” and all of its destinations, days, and items will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete trip"
+        cancelLabel="Keep trip"
+        variant="danger"
+        loading={deleteTarget !== null && deletingId === deleteTarget.id}
+        onCancel={() => {
+          if (!deletingId) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (deleteTarget) void deleteTrip(deleteTarget.id);
+        }}
+      />
       <div className="max-w-2xl mx-auto px-5 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -223,11 +245,7 @@ export function Dashboard() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm(`Delete "${trip.title}"? This cannot be undone.`)) {
-                        deleteTrip(trip.id);
-                      }
-                    }}
+                    onClick={() => setDeleteTarget({ id: trip.id, title: trip.title })}
                     disabled={deletingId === trip.id}
                     className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50"
                   >

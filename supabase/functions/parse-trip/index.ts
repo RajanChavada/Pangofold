@@ -32,6 +32,9 @@ serve(async (req) => {
 
     const tripJson = await parseWithAI(title, textContent, links, structured);
 
+    /** LLM often tags meals as itinerary items (category food) but omits foodSpots / activities rows. */
+    syncItineraryCategoriesToTables(tripJson);
+
     // Validate and fix required fields
     if (!tripJson.title) tripJson.title = title;
     for (const dest of tripJson.destinations || []) {
@@ -153,6 +156,66 @@ serve(async (req) => {
   }
 });
 
+function dedupeKey(name: string, link: string | null | undefined): string {
+  return `${(name || "").trim().toLowerCase()}|${(link || "").trim()}`;
+}
+
+/** Ensures category=food / category=activity on day items also get food_spots / activities rows. */
+function syncItineraryCategoriesToTables(tripJson: Record<string, unknown>): void {
+  const destinations = tripJson.destinations as Record<string, unknown>[] | undefined;
+  if (!destinations?.length) return;
+
+  for (const dest of destinations) {
+    if (!Array.isArray(dest.foodSpots)) dest.foodSpots = [];
+    if (!Array.isArray(dest.activities)) dest.activities = [];
+
+    const foodSpots = dest.foodSpots as Record<string, unknown>[];
+    const activities = dest.activities as Record<string, unknown>[];
+
+    const foodSeen = new Set(
+      foodSpots.map((f) => dedupeKey(String(f.name ?? ""), f.link as string | undefined)),
+    );
+    const actSeen = new Set(
+      activities.map((a) => dedupeKey(String(a.name ?? ""), a.link as string | undefined)),
+    );
+
+    const days = dest.days as Record<string, unknown>[] | undefined;
+    for (const day of days || []) {
+      const items = day.items as Record<string, unknown>[] | undefined;
+      for (const item of items || []) {
+        const cat = String(item.category || "").toLowerCase();
+        const title = String(item.title || "Untitled").trim() || "Untitled";
+
+        if (cat === "food") {
+          const k = dedupeKey(title, item.link as string | undefined);
+          if (!foodSeen.has(k)) {
+            foodSeen.add(k);
+            foodSpots.push({
+              name: title,
+              type: "restaurant",
+              notes: item.description ?? null,
+              link: item.link ?? null,
+              priceRange: item.cost ?? null,
+            });
+          }
+        } else if (cat === "activity") {
+          const k = dedupeKey(title, item.link as string | undefined);
+          if (!actSeen.has(k)) {
+            actSeen.add(k);
+            activities.push({
+              name: title,
+              notes: item.description ?? null,
+              cost: item.cost ?? null,
+              link: item.link ?? null,
+              location: item.location ?? null,
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
 async function parseWithAI(
   title: string,
   textContent: string,
@@ -173,9 +236,11 @@ The pattern analysis was auto-detected and contains:
 
 YOUR JOB: Convert this into a structured trip JSON. You handle the SEMANTICS (what things mean):
 - Determine which sections are days/destinations/logistics
-- Categorize items: food, activity, transport, accommodation, other
+- Categorize day items: food, activity, transport, accommodation, other
+- CRITICAL: Every restaurant, meal, cafe, or dining stop must appear in BOTH (1) the correct day's items with category "food" AND (2) the destination's "foodSpots" array (name, type, notes, link, priceRange). Do not put meals only in days without a matching foodSpots entry.
+- CRITICAL: Every hike, park, attraction, excursion, or sightseeing block must appear in BOTH (1) day items with category "activity" AND (2) the destination's "activities" array (name, notes, cost, link, location).
+- Transport and accommodation stay as day items (or hotel object); flights/car rental use transport or accommodation categories.
 - Identify hotels/accommodation from key-values or items mentioning addresses
-- Group food items (sub-section labeled "Food" or food-related items) into foodSpots
 - Preserve ALL links, times, costs, and isChecked values exactly as given
 - Empty sections should still appear as empty days
 - Orphan items go into the destination's activities array
@@ -195,6 +260,8 @@ Links found: ${links.slice(0, 30).join(", ")}
 
 REQUIRED JSON structure (destinations.name MUST be a real city/region name, NEVER null):
 {"title":"string","startDate":"YYYY-MM-DD or null","endDate":"YYYY-MM-DD or null","destinations":[{"name":"REQUIRED city/region name","duration":"string or null","hotel":{"name":"string or null","address":"string or null","link":"string or null"},"days":[{"dayNumber":1,"date":"YYYY-MM-DD or null","items":[{"time":"string or null","title":"REQUIRED string","description":"string or null","category":"food|activity|transport|accommodation|other","location":"string or null","link":"string or null","cost":"string or null","isChecked":false}]}],"foodSpots":[{"name":"REQUIRED string","type":"restaurant|cafe|street|bakery|bar","notes":"string or null","link":"string or null","priceRange":"string or null"}],"activities":[{"name":"REQUIRED string","notes":"string or null","cost":"string or null","link":"string or null","location":"string or null"}]}]}
+
+Duplicate semantics: for each meal in days[].items with category "food", include a matching object in foodSpots (same name/link). For each attraction in days[].items with category "activity", include a matching object in activities. The itinerary/plan stays in days; foodSpots and activities are the dedicated lists for those tabs.
 
 If you cannot determine the destination city, use the title or "Trip Destination" as fallback. NEVER return null for name fields.`;
 
