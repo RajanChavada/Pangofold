@@ -133,10 +133,8 @@ export function TripView() {
   const useMock = !isCollab && !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
   const destForHooks = trip?.destinations[destIndex];
-  const mapPinCount = useMemo(
-    () => (destForHooks ? collectDestinationMapPoints(destForHooks).length : 0),
-    [destForHooks],
-  );
+  /** Derived inline (not useMemo) so hook count never changes vs loading/error branches. */
+  const mapPinCount = destForHooks ? collectDestinationMapPoints(destForHooks).length : 0;
   const dayForHooks = destForHooks?.days[dayIndex];
   const conflicts = useScheduleConflicts(destForHooks, dayForHooks);
   const { tripTotalCents, dayTotalCents } = useTripSpend(entries, dayForHooks?.date);

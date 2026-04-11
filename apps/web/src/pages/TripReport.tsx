@@ -202,7 +202,13 @@ export function TripReport() {
           Tap the edges of the card or use arrow keys — like Spotify Wrapped.
         </p>
 
-        <WrappedStory trip={trip} payload={payload} entries={entries} exportRef={shareCardRef} />
+        <WrappedStory
+          key={trip.id}
+          trip={trip}
+          payload={payload}
+          entries={entries}
+          exportRef={shareCardRef}
+        />
 
         <button
           type="button"

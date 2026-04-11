@@ -1,7 +1,7 @@
 import type { Destination } from "@pangofold/shared";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import "leaflet/dist/leaflet.css";
 
 const markerIcon = L.icon({
@@ -74,16 +74,17 @@ interface TripMapPanelProps {
 }
 
 export function TripMapPanel({ dest }: TripMapPanelProps) {
-  const points = useMemo(() => collectDestinationMapPoints(dest), [dest]);
-  const positions = useMemo(() => points.map((p) => [p.lat, p.lng] as [number, number]), [points]);
+  const points = collectDestinationMapPoints(dest);
+  const positions = points.map((p) => [p.lat, p.lng] as [number, number]);
 
-  const center = useMemo((): [number, number] => {
-    if (points.length === 0) return [49.25, -123.12];
-    if (points.length === 1) return [points[0].lat, points[0].lng];
+  let center: [number, number] = [49.25, -123.12];
+  if (points.length === 1) {
+    center = [points[0].lat, points[0].lng];
+  } else if (points.length > 1) {
     const lat = points.reduce((s, p) => s + p.lat, 0) / points.length;
     const lng = points.reduce((s, p) => s + p.lng, 0) / points.length;
-    return [lat, lng];
-  }, [points]);
+    center = [lat, lng];
+  }
 
   if (points.length === 0) {
     return (

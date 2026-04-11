@@ -81,10 +81,15 @@ interface WrappedStoryProps {
 }
 
 export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStoryProps) {
-  const slides = useMemo(() => buildSlideList(payload, entries), [payload, entries]);
-  const itemById = useMemo(() => collectItemMap(trip), [trip]);
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
+  const slides = useMemo(() => buildSlideList(payload, entries), [payload, entries]);
+  const itemById = useMemo(() => collectItemMap(trip), [trip]);
+
+  useEffect(() => {
+    if (slides.length === 0) return;
+    setIndex((i) => Math.min(i, slides.length - 1));
+  }, [slides.length]);
 
   const go = useCallback(
     (delta: number) => {

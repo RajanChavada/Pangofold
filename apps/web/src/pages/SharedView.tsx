@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useParams } from "react-router";
 import { Utensils, Compass, ListChecks, List, MapPin, Calendar, Map as MapIcon } from "lucide-react";
 import { useTripBySlug } from "../hooks/useTrip";
@@ -34,10 +34,7 @@ export function SharedView() {
   const [viewTab, setViewTab] = useState<ViewTab>("itinerary");
 
   const dest = trip?.destinations[destIndex];
-  const mapPinCount = useMemo(
-    () => (dest ? collectDestinationMapPoints(dest).length : 0),
-    [dest],
-  );
+  const mapPinCount = dest ? collectDestinationMapPoints(dest).length : 0;
 
   if (loading) {
     return (
