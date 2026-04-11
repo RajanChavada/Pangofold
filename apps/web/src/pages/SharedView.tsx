@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams } from "react-router";
 import { Utensils, Compass, ListChecks, List, MapPin, Calendar, Map as MapIcon } from "lucide-react";
 import { useTripBySlug } from "../hooks/useTrip";
@@ -13,6 +13,7 @@ import { cn } from "../lib/cn";
 import { TripMapPanel, collectDestinationMapPoints } from "../components/TripMapPanel";
 
 type ViewTab = "itinerary" | "food" | "activities" | "map";
+type ItineraryFilter = "all" | "food" | "activity";
 
 function formatDateRange(start: string, end: string): string {
   const s = new Date(start + "T00:00:00");
@@ -32,9 +33,27 @@ export function SharedView() {
   const [dayIndex, setDayIndex] = useState(0);
   const [checklistMode, setChecklistMode] = useState(false);
   const [viewTab, setViewTab] = useState<ViewTab>("itinerary");
+  const [itineraryFilter, setItineraryFilter] = useState<ItineraryFilter>("all");
 
   const dest = trip?.destinations[destIndex];
+  const day = dest?.days[dayIndex];
   const mapPinCount = dest ? collectDestinationMapPoints(dest).length : 0;
+
+  const itineraryFilterCounts = useMemo(() => {
+    const items = day?.items ?? [];
+    return {
+      all: items.length,
+      food: items.filter((i) => i.category === "food").length,
+      activity: items.filter((i) => i.category === "activity").length,
+    };
+  }, [day]);
+
+  const filteredItineraryItems = useMemo(() => {
+    const items = day?.items ?? [];
+    if (itineraryFilter === "all") return items;
+    if (itineraryFilter === "food") return items.filter((i) => i.category === "food");
+    return items.filter((i) => i.category === "activity");
+  }, [day, itineraryFilter]);
 
   if (loading) {
     return (
@@ -55,8 +74,6 @@ export function SharedView() {
       </div>
     );
   }
-
-  const day = dest?.days[dayIndex];
 
   const handleDestChange = (i: number) => {
     setDestIndex(i);
@@ -143,14 +160,36 @@ export function SharedView() {
               onChange={setDayIndex}
             />
 
-            <div className="px-5 mb-3 flex items-center justify-between">
+            <div className="px-5 mb-2 flex flex-wrap gap-2">
+              {(["all", "food", "activity"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setItineraryFilter(key)}
+                  className={cn(
+                    "text-xs font-medium px-3 py-1.5 rounded-full border transition-all cursor-pointer inline-flex items-center gap-1",
+                    itineraryFilter === key
+                      ? "bg-primary text-white border-primary"
+                      : "bg-surface-card border-border text-text-muted hover:text-text",
+                  )}
+                >
+                  {key === "all" ? "All" : key === "food" ? "Food" : "Activities"}
+                  <span className="opacity-80">({itineraryFilterCounts[key]})</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="px-5 mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-text-muted">
-                {day?.items.length ?? 0} items
+                {itineraryFilter === "all"
+                  ? `${day?.items.length ?? 0} items`
+                  : `${filteredItineraryItems.length} of ${day?.items.length ?? 0} items`}
               </p>
               <button
+                type="button"
                 onClick={() => setChecklistMode(!checklistMode)}
                 className={cn(
-                  "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all cursor-pointer",
+                  "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all cursor-pointer shrink-0",
                   checklistMode
                     ? "bg-primary text-white"
                     : "bg-surface-card border border-border text-text-muted hover:text-text",
@@ -162,13 +201,26 @@ export function SharedView() {
             </div>
 
             <div className="px-5 space-y-3">
-              {day?.items.map((item) => (
+              {filteredItineraryItems.map((item) => (
                 <ItineraryCard
                   key={item.id}
                   item={item}
                   checklistMode={checklistMode}
                 />
               ))}
+              {day && day.items.length > 0 && filteredItineraryItems.length === 0 && (
+                <div className="text-center py-10 text-text-muted text-sm">
+                  No {itineraryFilter === "food" ? "food" : "activity"} stops on this day. Try{" "}
+                  <button
+                    type="button"
+                    className="text-primary font-medium underline cursor-pointer"
+                    onClick={() => setItineraryFilter("all")}
+                  >
+                    All
+                  </button>{" "}
+                  or another day.
+                </div>
+              )}
               {(!day || day.items.length === 0) && (
                 <div className="text-center py-12 text-text-muted text-sm">
                   No items for this day.

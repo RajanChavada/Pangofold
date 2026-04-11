@@ -1,6 +1,16 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams, useMatch, useSearchParams, useNavigate } from "react-router";
-import { Utensils, Compass, ListChecks, List, MapPin, Sparkles, Plus, Map as MapIcon } from "lucide-react";
+import {
+  Utensils,
+  Compass,
+  ListChecks,
+  List,
+  MapPin,
+  Sparkles,
+  Plus,
+  Map as MapIcon,
+  ImageIcon,
+} from "lucide-react";
 import { useTrip, useScheduleConflicts } from "../hooks/useTrip";
 import { useJournal } from "../hooks/useJournal";
 import { useTripSpend } from "../hooks/useTripSpend";
@@ -21,8 +31,10 @@ import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
 import { supabase } from "../lib/supabase";
 import { personDisplayKey } from "../lib/trip-report";
+import { collectPhotosFromEntries, journalEntriesForDay } from "../lib/journal-photos";
 
 type ViewTab = "itinerary" | "food" | "activities" | "map";
+type ItineraryFilter = "all" | "food" | "activity";
 
 async function filesToGuestPhotos(
   files: File[],
@@ -62,6 +74,7 @@ export function TripView() {
   const [dayIndex, setDayIndex] = useState(0);
   const [checklistMode, setChecklistMode] = useState(false);
   const [viewTab, setViewTab] = useState<ViewTab>("itinerary");
+  const [itineraryFilter, setItineraryFilter] = useState<ItineraryFilter>("all");
   const [journalOpen, setJournalOpen] = useState(false);
   const [journalItemId, setJournalItemId] = useState<string | null>(null);
   const [journalDefaultTitle, setJournalDefaultTitle] = useState("");
@@ -238,6 +251,29 @@ export function TripView() {
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [entries]);
+
+  const itineraryFilterCounts = useMemo(() => {
+    const items = dayForHooks?.items ?? [];
+    return {
+      all: items.length,
+      food: items.filter((i) => i.category === "food").length,
+      activity: items.filter((i) => i.category === "activity").length,
+    };
+  }, [dayForHooks]);
+
+  const filteredItineraryItems = useMemo(() => {
+    const items = dayForHooks?.items ?? [];
+    if (itineraryFilter === "all") return items;
+    if (itineraryFilter === "food") return items.filter((i) => i.category === "food");
+    return items.filter((i) => i.category === "activity");
+  }, [dayForHooks, itineraryFilter]);
+
+  const dayJournalPhotos = useMemo(() => {
+    if (!dayForHooks) return [];
+    return collectPhotosFromEntries(journalEntriesForDay(entries, dayForHooks));
+  }, [entries, dayForHooks]);
+
+  const allTripPhotos = useMemo(() => collectPhotosFromEntries(entries), [entries]);
 
   if (loading || (isCollab && gate === "checking")) {
     return (
@@ -550,9 +586,52 @@ export function TripView() {
               onChange={setDayIndex}
             />
 
-            <div className="px-5 mb-3 flex items-center justify-between">
+            <div className="px-5 mb-2 flex flex-wrap gap-2">
+              {(["all", "food", "activity"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setItineraryFilter(key)}
+                  className={cn(
+                    "text-xs font-medium px-3 py-1.5 rounded-full border transition-all cursor-pointer inline-flex items-center gap-1",
+                    itineraryFilter === key
+                      ? "bg-primary text-white border-primary"
+                      : "bg-surface-card border-border text-text-muted hover:text-text",
+                  )}
+                >
+                  {key === "all" ? "All" : key === "food" ? "Food" : "Activities"}
+                  <span className="opacity-80">({itineraryFilterCounts[key]})</span>
+                </button>
+              ))}
+            </div>
+
+            {!useMock && dayJournalPhotos.length > 0 && (
+              <div className="px-5 mb-3">
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5" aria-hidden />
+                  This day’s photos
+                </p>
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                  {dayJournalPhotos.map((p) => (
+                    <a
+                      key={`${p.entryId}-${p.photoId}`}
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 rounded-xl overflow-hidden border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      <img src={p.url} alt="" className="h-20 w-20 object-cover" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="px-5 mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-text-muted">
-                {day?.items.length ?? 0} items
+                {itineraryFilter === "all"
+                  ? `${day?.items.length ?? 0} items`
+                  : `${filteredItineraryItems.length} of ${day?.items.length ?? 0} items`}
                 {day?.date &&
                   ` · ${new Date(day.date + "T00:00:00").toLocaleDateString("en-US", {
                     weekday: "long",
@@ -561,9 +640,10 @@ export function TripView() {
                   })}`}
               </p>
               <button
+                type="button"
                 onClick={() => setChecklistMode(!checklistMode)}
                 className={cn(
-                  "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all cursor-pointer",
+                  "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-all cursor-pointer shrink-0",
                   checklistMode
                     ? "bg-primary text-white"
                     : "bg-surface-card border border-border text-text-muted hover:text-text",
@@ -575,7 +655,7 @@ export function TripView() {
             </div>
 
             <div className="px-5 space-y-3">
-              {day?.items.map((item) => (
+              {filteredItineraryItems.map((item) => (
                 <ItineraryCard
                   key={item.id}
                   item={item}
@@ -587,6 +667,19 @@ export function TripView() {
                   scheduleConflict={conflictIds.has(item.id)}
                 />
               ))}
+              {day && day.items.length > 0 && filteredItineraryItems.length === 0 && (
+                <div className="text-center py-10 text-text-muted text-sm">
+                  No {itineraryFilter === "food" ? "food" : "activity"} stops on this day. Try{" "}
+                  <button
+                    type="button"
+                    className="text-primary font-medium underline cursor-pointer"
+                    onClick={() => setItineraryFilter("all")}
+                  >
+                    All
+                  </button>{" "}
+                  or another day.
+                </div>
+              )}
               {(!day || day.items.length === 0) && (
                 <div className="text-center py-12 text-text-muted text-sm">
                   No items for this day yet.
@@ -671,6 +764,29 @@ export function TripView() {
           >
             <Plus className="w-7 h-7" />
           </button>
+        )}
+
+        {!useMock && allTripPhotos.length > 0 && (
+          <div className="px-5 mt-8">
+            <SectionHeader
+              icon={<ImageIcon className="w-4 h-4 text-violet-600" />}
+              title="Trip photos"
+              count={allTripPhotos.length}
+            />
+            <div className="grid grid-cols-3 gap-1.5 mt-3">
+              {allTripPhotos.map((p) => (
+                <a
+                  key={`g-${p.entryId}-${p.photoId}`}
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="aspect-square rounded-xl overflow-hidden border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <img src={p.url} alt="" className="h-full w-full object-cover" />
+                </a>
+              ))}
+            </div>
+          </div>
         )}
 
         {!useMock && entries.length > 0 && (

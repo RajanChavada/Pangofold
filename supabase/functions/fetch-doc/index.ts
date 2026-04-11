@@ -61,7 +61,7 @@ serve(async (req) => {
 });
 
 function isMapsLink(url: string): boolean {
-  return /goo\.gl|maps\.app\.goo\.gl|google\.com\/maps|maps\.google/i.test(url);
+  return /goo\.gl|maps\.app\.goo\.gl|google\.com\/maps|maps\.google|share\.google/i.test(url);
 }
 
 async function delayMs(ms: number) {

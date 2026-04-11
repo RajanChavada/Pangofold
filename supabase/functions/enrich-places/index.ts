@@ -302,7 +302,8 @@ function looksLikeGoogleMapsLink(raw: string | null | undefined): boolean {
     u.includes("google.com/maps") ||
     u.includes("maps.google.com") ||
     u.includes("goo.gl") ||
-    u.includes("maps.app.goo.gl")
+    u.includes("maps.app.goo.gl") ||
+    u.includes("share.google")
   );
 }
 
