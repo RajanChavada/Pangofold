@@ -202,7 +202,7 @@ export function TripView() {
         setEnrichMessage(`Linked ${n} new place${n === 1 ? "" : "s"} from Google.`);
       } else if (Number.isFinite(failed) && failed > 0) {
         setEnrichMessage(
-          `Google had no confident match for ${failed} stop${failed === 1 ? "" : "s"}. Add a specific address or venue name in your doc, then re-import or edit items.`,
+          `Google couldn't resolve a place for ${failed} stop${failed === 1 ? "" : "s"}. Add a specific address or venue name in your doc, then re-import or edit items.`,
         );
       } else if (Number.isFinite(already) && already > 0 && failed === 0) {
         setEnrichMessage("Every stop already has a place link — nothing new to add.");
