@@ -133,6 +133,10 @@ export function TripView() {
   const useMock = !isCollab && !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
   const destForHooks = trip?.destinations[destIndex];
+  const mapPinCount = useMemo(
+    () => (destForHooks ? collectDestinationMapPoints(destForHooks).length : 0),
+    [destForHooks],
+  );
   const dayForHooks = destForHooks?.days[dayIndex];
   const conflicts = useScheduleConflicts(destForHooks, dayForHooks);
   const { tripTotalCents, dayTotalCents } = useTripSpend(entries, dayForHooks?.date);
@@ -290,7 +294,6 @@ export function TripView() {
 
   const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
-  const mapPinCount = useMemo(() => (dest ? collectDestinationMapPoints(dest).length : 0), [dest]);
   const conflictIds = new Set<string>();
   for (const c of conflicts) {
     conflictIds.add(c.a.id);

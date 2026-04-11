@@ -33,6 +33,12 @@ export function SharedView() {
   const [checklistMode, setChecklistMode] = useState(false);
   const [viewTab, setViewTab] = useState<ViewTab>("itinerary");
 
+  const dest = trip?.destinations[destIndex];
+  const mapPinCount = useMemo(
+    () => (dest ? collectDestinationMapPoints(dest).length : 0),
+    [dest],
+  );
+
   if (loading) {
     return (
       <div className="min-h-dvh flex items-center justify-center">
@@ -53,9 +59,7 @@ export function SharedView() {
     );
   }
 
-  const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
-  const mapPinCount = useMemo(() => (dest ? collectDestinationMapPoints(dest).length : 0), [dest]);
 
   const handleDestChange = (i: number) => {
     setDestIndex(i);
