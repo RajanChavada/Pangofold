@@ -310,7 +310,13 @@ export function TripView() {
   const canJournal = !isCollab || Boolean(guestName && tokenFromUrl);
   const readOnlyTrip = isCollab;
   const dbPhase = trip.phase ?? "planning";
-  const showActiveSpendStrip = !useMock && !isCollab && dbPhase === "active";
+  /** Logged journal totals: show for owner, invited members, and verified guest links — not only in "active" phase. */
+  const canSeeTripSpendTotals =
+    !useMock &&
+    (isOwner ||
+      isMember ||
+      (isCollab && gate === "ok"));
+  const showTripSpendStrip = canSeeTripSpendTotals;
   const showJournalFab =
     !useMock && !isCollab && dbPhase === "active" && canJournal && !readOnlyTrip;
 
@@ -395,22 +401,24 @@ export function TripView() {
           }
         />
 
-        {showActiveSpendStrip && (
+        {showTripSpendStrip && (
           <div className="px-5 mb-3 sticky top-0 z-30 bg-surface/95 backdrop-blur border-b border-border py-3 -mx-0">
-            <p className="text-xs font-semibold text-text-muted uppercase tracking-wide">Running spend</p>
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-wide">Trip spend (logged)</p>
+            <p className="text-[11px] text-text-muted mb-1">
+              Total from journal entries — everyone on this trip sees the same number.
+            </p>
             <p className="text-lg font-bold text-text mt-0.5">
               {(tripTotalCents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })}{" "}
               <span className="text-sm font-normal text-text-muted">
-                trip
+                trip total
                 {day?.date && (
                   <>
                     {" "}
-                    · Day{" "}
+                    · This day{" "}
                     {(dayTotalCents / 100).toLocaleString("en-US", {
                       style: "currency",
                       currency: "USD",
-                    })}{" "}
-                    today
+                    })}
                   </>
                 )}
               </span>
