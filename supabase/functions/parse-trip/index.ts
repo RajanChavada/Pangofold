@@ -76,10 +76,12 @@ async function triggerEnrichPlaces(
 ): Promise<void> {
   const base = supabaseUrl.replace(/\/$/, "");
   try {
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const res = await fetch(`${base}/functions/v1/enrich-places`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: anonKey || serviceRoleKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ tripId, userId }),

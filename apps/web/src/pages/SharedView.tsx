@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams } from "react-router";
-import { Utensils, Compass, ListChecks, List, MapPin, Calendar } from "lucide-react";
+import { Utensils, Compass, ListChecks, List, MapPin, Calendar, Map as MapIcon } from "lucide-react";
 import { useTripBySlug } from "../hooks/useTrip";
 import { DestinationTabs } from "../components/DestinationTabs";
 import { DayTabs } from "../components/DayTabs";
@@ -10,8 +10,9 @@ import { ActivityCard } from "../components/ActivityCard";
 import { HotelCard } from "../components/HotelCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { cn } from "../lib/cn";
+import { TripMapPanel, collectDestinationMapPoints } from "../components/TripMapPanel";
 
-type ViewTab = "itinerary" | "food" | "activities";
+type ViewTab = "itinerary" | "food" | "activities" | "map";
 
 function formatDateRange(start: string, end: string): string {
   const s = new Date(start + "T00:00:00");
@@ -54,6 +55,7 @@ export function SharedView() {
 
   const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
+  const mapPinCount = useMemo(() => (dest ? collectDestinationMapPoints(dest).length : 0), [dest]);
 
   const handleDestChange = (i: number) => {
     setDestIndex(i);
@@ -64,6 +66,7 @@ export function SharedView() {
     { key: "itinerary", label: "Itinerary", icon: ListChecks, count: day?.items.length ?? 0 },
     { key: "food", label: "Food", icon: Utensils, count: dest?.foodSpots.length ?? 0 },
     { key: "activities", label: "Activities", icon: Compass, count: dest?.activities.length ?? 0 },
+    { key: "map", label: "Map", icon: MapIcon, count: mapPinCount },
   ];
 
   return (
@@ -211,6 +214,13 @@ export function SharedView() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {viewTab === "map" && dest && (
+          <div className="px-5 space-y-3">
+            <p className="text-xs text-text-muted">Map pins use coordinates from Google Places enrichment.</p>
+            <TripMapPanel dest={dest} />
           </div>
         )}
       </div>

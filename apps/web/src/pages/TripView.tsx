@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams, useMatch, useSearchParams, useNavigate } from "react-router";
-import { Utensils, Compass, ListChecks, List, MapPin, Sparkles, Plus } from "lucide-react";
+import { Utensils, Compass, ListChecks, List, MapPin, Sparkles, Plus, Map as MapIcon } from "lucide-react";
 import { useTrip, useScheduleConflicts } from "../hooks/useTrip";
 import { useJournal } from "../hooks/useJournal";
 import { useTripSpend } from "../hooks/useTripSpend";
@@ -15,13 +15,14 @@ import { ActivityCard } from "../components/ActivityCard";
 import { HotelCard } from "../components/HotelCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { JournalModal } from "../components/JournalModal";
+import { TripMapPanel, collectDestinationMapPoints } from "../components/TripMapPanel";
 import { CollabJoinModal } from "../components/CollabJoinModal";
 import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
 import { supabase } from "../lib/supabase";
 import { personDisplayKey } from "../lib/trip-report";
 
-type ViewTab = "itinerary" | "food" | "activities";
+type ViewTab = "itinerary" | "food" | "activities" | "map";
 
 async function filesToGuestPhotos(
   files: File[],
@@ -289,6 +290,7 @@ export function TripView() {
 
   const dest = trip.destinations[destIndex];
   const day = dest?.days[dayIndex];
+  const mapPinCount = useMemo(() => (dest ? collectDestinationMapPoints(dest).length : 0), [dest]);
   const conflictIds = new Set<string>();
   for (const c of conflicts) {
     conflictIds.add(c.a.id);
@@ -304,6 +306,7 @@ export function TripView() {
     { key: "itinerary", label: "Itinerary", icon: ListChecks, count: day?.items.length ?? 0 },
     { key: "food", label: "Food", icon: Utensils, count: dest?.foodSpots.length ?? 0 },
     { key: "activities", label: "Activities", icon: Compass, count: dest?.activities.length ?? 0 },
+    { key: "map", label: "Map", icon: MapIcon, count: mapPinCount },
   ];
 
   const split = trip.defaultSplitCount ?? 1;
@@ -629,6 +632,16 @@ export function TripView() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {viewTab === "map" && dest && (
+          <div className="px-5 space-y-3">
+            <p className="text-xs text-text-muted">
+              Pins for this destination come from enriched places (lat/lng). Use{" "}
+              <strong className="text-text">Enrich places (Google)</strong> above if the map is empty.
+            </p>
+            <TripMapPanel dest={dest} />
           </div>
         )}
 

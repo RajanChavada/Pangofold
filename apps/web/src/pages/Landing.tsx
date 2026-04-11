@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "../hooks/useAuth";
-import { extractGoogleDocId } from "@pangofold/shared";
+import { extractGoogleDocId, canonicalGoogleDocUrl } from "@pangofold/shared";
 import { Link } from "react-router";
 import { MapPin, FileText, Sparkles, ArrowRight, FolderOpen } from "lucide-react";
 import { supabase } from "../lib/supabase";
@@ -32,7 +32,36 @@ export function Landing() {
   const [parsing, setParsing] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** Trip already stored for this canonical doc URL (re-import overwrites parsed data from the doc). */
+  const [existingTripForDoc, setExistingTripForDoc] = useState<{ id: string; title: string } | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!user?.id || !docUrl.trim()) {
+      setExistingTripForDoc(null);
+      return;
+    }
+    const canon = canonicalGoogleDocUrl(docUrl);
+    if (!canon) {
+      setExistingTripForDoc(null);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("trips")
+      .select("id, title")
+      .eq("owner_id", user.id)
+      .eq("source_doc_url", canon)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setExistingTripForDoc(data ? { id: data.id, title: data.title } : null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, docUrl]);
 
   const processDoc = useCallback(async (url: string) => {
     setDocUrl(url);
@@ -187,6 +216,22 @@ export function Landing() {
                     required
                   />
                 </div>
+
+                {existingTripForDoc && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                    <p className="font-medium">This doc is already imported as “{existingTripForDoc.title}”.</p>
+                    <p className="mt-1 text-amber-900/90">
+                      Importing again <strong>re-parses the doc</strong> and refreshes your itinerary from Google — it
+                      does not duplicate the trip.
+                    </p>
+                    <Link
+                      to={`/trip/${existingTripForDoc.id}`}
+                      className="mt-2 inline-flex items-center gap-1 text-primary font-medium hover:underline"
+                    >
+                      Open existing trip <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                )}
 
                 {error && (
                   <p className="text-sm text-red-600 bg-red-50 rounded-lg px-4 py-2">

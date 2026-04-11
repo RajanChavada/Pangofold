@@ -18,6 +18,7 @@ import { useAuth } from "../hooks/useAuth";
 import { buildTripReportPayload } from "../lib/trip-report";
 import { supabase } from "../lib/supabase";
 import type { Trip, SuperlativeId } from "@pangofold/shared";
+import { WrappedStory } from "../components/wrapped/WrappedStory";
 
 const SUPERLATIVE_COPY: Record<
   SuperlativeId,
@@ -196,42 +197,23 @@ export function TripReport() {
           Back to trip
         </button>
 
-        <div
-          ref={shareCardRef}
-          className="rounded-3xl overflow-hidden border border-border bg-gradient-to-b from-violet-950 to-slate-950 text-white p-6 shadow-xl aspect-[9/16] max-h-[min(90vh,640px)] flex flex-col justify-between"
-        >
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-violet-200/90">Pangofold Wrapped</p>
-            <h1 className="text-2xl font-bold tracking-tight mt-2">{trip.title}</h1>
-            {trip.startDate && trip.endDate && (
-              <p className="text-sm text-violet-100/80 mt-1">
-                {trip.startDate} → {trip.endDate}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <p className="text-4xl font-black tabular-nums">
-              {formatMoney(payload.totalSpendCents)}
-            </p>
-            <p className="text-sm text-violet-100/90">Total logged spend</p>
-            {payload.bestRated && (
-              <p className="text-sm pt-2 border-t border-white/10">
-                Best moment: <strong>{payload.bestRated.title}</strong> ({payload.bestRated.rating}/5)
-              </p>
-            )}
-          </div>
-        </div>
+        <p className="text-lg font-semibold text-text mb-1">Your Wrapped</p>
+        <p className="text-sm text-text-muted mb-6">
+          Tap the edges of the card or use arrow keys — like Spotify Wrapped.
+        </p>
+
+        <WrappedStory trip={trip} payload={payload} entries={entries} exportRef={shareCardRef} />
 
         <button
           type="button"
           onClick={() => void handleExportPng()}
           disabled={exporting}
-          className="mt-4 w-full py-3 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+          className="mt-6 w-full py-3 rounded-xl bg-slate-900 text-white font-medium hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
         >
-          {exporting ? "Saving image…" : "Download story card (PNG)"}
+          {exporting ? "Saving image…" : "Download current slide as PNG"}
         </button>
 
-        <h1 className="text-2xl font-bold tracking-tight mt-10">{trip.title}</h1>
+        <h2 className="text-2xl font-bold tracking-tight mt-12">{trip.title}</h2>
         <p className="text-sm text-text-muted mt-1">Full report</p>
 
         <div className="mt-6 space-y-4">

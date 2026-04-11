@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { JournalSpendingCategory, JournalSplitMode } from "@pangofold/shared";
 import { X, Camera } from "lucide-react";
 import { cn } from "../lib/cn";
+import { isCapacitorNative, pickOneNativePhoto } from "../lib/nativePhotos";
 
 const CATEGORIES: { value: JournalSpendingCategory; label: string }[] = [
   { value: "food", label: "Food" },
@@ -65,8 +66,14 @@ export function JournalModal({
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [entryTitle, setEntryTitle] = useState(defaultTitle);
+  const [nativeCam, setNativeCam] = useState(false);
+  const [nativeBusy, setNativeBusy] = useState(false);
 
   const datalistId = useMemo(() => `paid-roster-${Math.random().toString(36).slice(2)}`, []);
+
+  useEffect(() => {
+    setNativeCam(isCapacitorNative());
+  }, []);
 
   if (!open) return null;
 
@@ -231,12 +238,29 @@ export function JournalModal({
               <Camera className="w-3.5 h-3.5" />
               Photos
             </label>
+            {nativeCam && (
+              <button
+                type="button"
+                disabled={nativeBusy}
+                onClick={() => {
+                  setNativeBusy(true);
+                  void pickOneNativePhoto()
+                    .then((f) => {
+                      if (f) setFiles((prev) => [...prev, f]);
+                    })
+                    .finally(() => setNativeBusy(false));
+                }}
+                className="mt-2 w-full rounded-xl border border-border bg-surface py-2.5 text-sm font-medium text-text hover:bg-surface-muted disabled:opacity-50 cursor-pointer"
+              >
+                {nativeBusy ? "Opening camera…" : "Camera or photo library"}
+              </button>
+            )}
             <input
               type="file"
               accept="image/*"
               multiple
               onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
-              className="mt-1 text-sm w-full"
+              className={cn("text-sm w-full", nativeCam ? "mt-2" : "mt-1")}
             />
             {files.length > 0 && (
               <p className="text-xs text-text-muted mt-1">{files.length} file(s) selected</p>

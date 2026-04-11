@@ -140,9 +140,17 @@ serve(async (req) => {
             alreadyLinked++;
             continue;
           }
-          const queries = buildSearchQueries(item.title, item.location, ctx, regionHint);
-          if (queries.length === 0) continue;
-          const placeId = await findOrCreatePlaceWithFallbacks(supabase, queries);
+          const loc = (item.location || "").trim();
+          let placeId = await tryAttachFromMapsLink(supabase, item.link);
+          if (!placeId) {
+            const queries = buildSearchQueries(item.title, loc || null, ctx, regionHint);
+            if (queries.length > 0) {
+              placeId = await findOrCreatePlaceWithFallbacks(supabase, queries);
+            }
+            if (!placeId && loc.length > 2) {
+              placeId = await findOrCreatePlaceFromGeocode(supabase, `${loc}${regionHint}`);
+            }
+          }
           if (placeId) {
             await supabase.from("itinerary_items").update({ place_id: placeId }).eq("id", item.id);
             enriched++;
@@ -163,9 +171,13 @@ serve(async (req) => {
           alreadyLinked++;
           continue;
         }
-        const queries = buildSearchQueries(f.name, null, ctx, regionHint);
-        if (queries.length === 0) continue;
-        const placeId = await findOrCreatePlaceWithFallbacks(supabase, queries);
+        let placeId = await tryAttachFromMapsLink(supabase, f.link);
+        if (!placeId) {
+          const queries = buildSearchQueries(f.name, null, ctx, regionHint);
+          if (queries.length > 0) {
+            placeId = await findOrCreatePlaceWithFallbacks(supabase, queries);
+          }
+        }
         if (placeId) {
           await supabase.from("food_spots").update({ place_id: placeId }).eq("id", f.id);
           enriched++;
@@ -185,9 +197,17 @@ serve(async (req) => {
           alreadyLinked++;
           continue;
         }
-        const queries = buildSearchQueries(a.name, a.location, ctx, regionHint);
-        if (queries.length === 0) continue;
-        const placeId = await findOrCreatePlaceWithFallbacks(supabase, queries);
+        const aloc = (a.location || "").trim();
+        let placeId = await tryAttachFromMapsLink(supabase, a.link);
+        if (!placeId) {
+          const queries = buildSearchQueries(a.name, aloc || null, ctx, regionHint);
+          if (queries.length > 0) {
+            placeId = await findOrCreatePlaceWithFallbacks(supabase, queries);
+          }
+          if (!placeId && aloc.length > 2) {
+            placeId = await findOrCreatePlaceFromGeocode(supabase, `${aloc}${regionHint}`);
+          }
+        }
         if (placeId) {
           await supabase.from("activities").update({ place_id: placeId }).eq("id", a.id);
           enriched++;
@@ -268,10 +288,124 @@ function buildSearchQueries(
   const seen = new Set<string>();
   return out.filter((q) => {
     const k = q.toLowerCase();
-    if (seen.has(k) || q.length < 4) return false;
+    if (seen.has(k) || q.length < 3) return false;
     seen.add(k);
     return true;
   });
+}
+
+function looksLikeGoogleMapsLink(raw: string | null | undefined): boolean {
+  if (!raw?.trim()) return false;
+  const u = raw.trim().toLowerCase();
+  if (u.startsWith("data:") || u.startsWith("javascript:")) return false;
+  return (
+    u.includes("google.com/maps") ||
+    u.includes("maps.google.com") ||
+    u.includes("goo.gl") ||
+    u.includes("maps.app.goo.gl")
+  );
+}
+
+async function resolveGoogleMapsLink(
+  rawLink: string,
+): Promise<{ placeId?: string; lat?: number; lng?: number } | null> {
+  try {
+    const res = await fetch(rawLink, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; PangofoldEnrich/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+    if (!res.ok) {
+      console.warn("[enrich-places] fetch maps link HTTP", res.status, rawLink.slice(0, 80));
+      return null;
+    }
+    const finalUrl = res.url;
+
+    const at = finalUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (at) {
+      return { lat: parseFloat(at[1]), lng: parseFloat(at[2]) };
+    }
+
+    const bang = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (bang) {
+      return { lat: parseFloat(bang[1]), lng: parseFloat(bang[2]) };
+    }
+
+    const placeIdParam = finalUrl.match(/[?&]place_id=([^&]+)/);
+    if (placeIdParam) {
+      return { placeId: decodeURIComponent(placeIdParam[1]) };
+    }
+
+    const ch = finalUrl.match(/(ChIJ[A-Za-z0-9_-]{20,})/);
+    if (ch) return { placeId: ch[1] };
+  } catch (e) {
+    console.warn("[enrich-places] resolveGoogleMapsLink", e);
+  }
+  return null;
+}
+
+async function nearbySearchPlaceId(lat: number, lng: number): Promise<string | null> {
+  for (const radius of [120, 400]) {
+    const url =
+      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&key=${GOOGLE_MAPS_API_KEY}`;
+    const j = await fetch(url).then((r) => r.json()) as {
+      status?: string;
+      error_message?: string;
+      results?: Array<{ place_id?: string }>;
+    };
+    if (j.status && j.status !== "OK" && j.status !== "ZERO_RESULTS") {
+      console.warn("[enrich-places] NearbySearch", j.status, j.error_message);
+    }
+    const pid = j.results?.[0]?.place_id;
+    if (pid) return pid;
+    await delay(40);
+  }
+  return null;
+}
+
+async function tryAttachFromMapsLink(
+  supabase: ReturnType<typeof createClient>,
+  link: string | null | undefined,
+): Promise<string | null> {
+  if (!looksLikeGoogleMapsLink(link)) return null;
+  const resolved = await resolveGoogleMapsLink(link!.trim());
+  if (!resolved) return null;
+
+  if (resolved.placeId) {
+    const id = await upsertPlaceFromGooglePlaceId(supabase, resolved.placeId, link!.trim());
+    if (id) return id;
+  }
+
+  if (resolved.lat != null && resolved.lng != null) {
+    const pid = await nearbySearchPlaceId(resolved.lat, resolved.lng);
+    if (pid) {
+      const id = await upsertPlaceFromGooglePlaceId(supabase, pid, link!.trim());
+      if (id) return id;
+    }
+  }
+
+  return null;
+}
+
+async function findOrCreatePlaceFromGeocode(
+  supabase: ReturnType<typeof createClient>,
+  address: string,
+): Promise<string | null> {
+  const url =
+    `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_API_KEY}`;
+  const ge = await fetch(url).then((r) => r.json()) as {
+    status?: string;
+    error_message?: string;
+    results?: Array<{ formatted_address?: string }>;
+  };
+  if (ge.status && ge.status !== "OK" && ge.status !== "ZERO_RESULTS") {
+    console.warn("[enrich-places] Geocode", ge.status, ge.error_message);
+  }
+  const formatted = ge.results?.[0]?.formatted_address;
+  if (!formatted) return null;
+  return findOrCreatePlace(supabase, formatted);
 }
 
 async function findOrCreatePlaceWithFallbacks(
@@ -290,9 +424,70 @@ async function delay(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-interface PlaceRow {
-  id: string;
-  google_place_id: string | null;
+interface PlaceDetailsResult {
+  name?: string;
+  formatted_address?: string;
+  geometry?: { location?: { lat?: number; lng?: number } };
+  rating?: number;
+  opening_hours?: unknown;
+  photos?: Array<{ photo_reference?: string }>;
+}
+
+async function upsertPlaceFromGooglePlaceId(
+  supabase: ReturnType<typeof createClient>,
+  googlePlaceId: string,
+  rawQuery: string,
+): Promise<string | null> {
+  const { data: existing } = await supabase
+    .from("places")
+    .select("id")
+    .eq("google_place_id", googlePlaceId)
+    .maybeSingle();
+
+  if (existing?.id) return existing.id;
+
+  const detUrl =
+    `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(googlePlaceId)}&fields=name,formatted_address,geometry,rating,opening_hours,photos&key=${GOOGLE_MAPS_API_KEY}`;
+  const detRes = await fetch(detUrl);
+  const detJson = await detRes.json() as { result?: PlaceDetailsResult; status?: string; error_message?: string };
+  if (detJson.status && detJson.status !== "OK") {
+    console.warn("[enrich-places] PlaceDetails", detJson.status, detJson.error_message, googlePlaceId);
+  }
+  const r = detJson.result;
+  if (!r) return null;
+
+  const lat = r.geometry?.location?.lat ?? null;
+  const lng = r.geometry?.location?.lng ?? null;
+  const photoRefs = Array.isArray(r.photos)
+    ? r.photos.slice(0, 3).map((p) => p.photo_reference).filter(Boolean) as string[]
+    : [];
+
+  const { data: inserted, error } = await supabase
+    .from("places")
+    .insert({
+      google_place_id: googlePlaceId,
+      display_name: r.name || rawQuery,
+      formatted_address: r.formatted_address ?? null,
+      lat,
+      lng,
+      rating: r.rating ?? null,
+      hours_json: r.opening_hours ?? null,
+      photo_refs: photoRefs.length ? photoRefs : null,
+      raw_query: rawQuery,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    const { data: retry } = await supabase
+      .from("places")
+      .select("id")
+      .eq("google_place_id", googlePlaceId)
+      .maybeSingle();
+    return retry?.id ?? null;
+  }
+
+  return inserted?.id ?? null;
 }
 
 async function findOrCreatePlace(
@@ -314,51 +509,5 @@ async function findOrCreatePlace(
   const cand = findJson.candidates?.[0];
   if (!cand?.place_id) return null;
 
-  const { data: existing } = await supabase
-    .from("places")
-    .select("id, google_place_id")
-    .eq("google_place_id", cand.place_id)
-    .maybeSingle();
-
-  if (existing) return (existing as PlaceRow).id;
-
-  const detUrl =
-    `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(cand.place_id)}&fields=name,formatted_address,geometry,rating,opening_hours,photos&key=${GOOGLE_MAPS_API_KEY}`;
-  const detRes = await fetch(detUrl);
-  const detJson = await detRes.json();
-  const r = detJson.result;
-  if (!r) return null;
-
-  const lat = r.geometry?.location?.lat ?? null;
-  const lng = r.geometry?.location?.lng ?? null;
-  const photoRefs = Array.isArray(r.photos)
-    ? r.photos.slice(0, 3).map((p: { photo_reference?: string }) => p.photo_reference).filter(Boolean)
-    : [];
-
-  const { data: inserted, error } = await supabase
-    .from("places")
-    .insert({
-      google_place_id: cand.place_id,
-      display_name: r.name || cand.name || query,
-      formatted_address: r.formatted_address ?? null,
-      lat,
-      lng,
-      rating: r.rating ?? null,
-      hours_json: r.opening_hours ?? null,
-      photo_refs: photoRefs.length ? photoRefs : null,
-      raw_query: query,
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    const { data: retry } = await supabase
-      .from("places")
-      .select("id")
-      .eq("google_place_id", cand.place_id)
-      .maybeSingle();
-    return retry?.id ?? null;
-  }
-
-  return inserted?.id ?? null;
+  return upsertPlaceFromGooglePlaceId(supabase, cand.place_id, query);
 }
