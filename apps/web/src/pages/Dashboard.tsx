@@ -8,13 +8,13 @@ import {
   Calendar,
   ExternalLink,
   Share2,
-  Copy,
-  Check,
   ArrowRight,
   Plane,
   Trash2,
 } from "lucide-react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { TripShareDropdown } from "../components/TripShareDropdown";
+import { cn } from "../lib/cn";
 
 interface TripSummary {
   id: string;
@@ -33,7 +33,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const [shareMenu, setShareMenu] = useState<{ tripId: string; from: "header" | "row" } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
@@ -69,11 +69,10 @@ export function Dashboard() {
     })();
   }, [user]);
 
-  const copyShareLink = (slug: string) => {
-    const url = `${window.location.origin}/s/${slug}`;
-    navigator.clipboard.writeText(url);
-    setCopiedSlug(slug);
-    setTimeout(() => setCopiedSlug(null), 2000);
+  const toggleShareMenu = (tripId: string, from: "header" | "row") => {
+    setShareMenu((prev) =>
+      prev?.tripId === tripId && prev.from === from ? null : { tripId, from },
+    );
   };
 
   const deleteTrip = async (id: string) => {
@@ -165,7 +164,7 @@ export function Dashboard() {
             {trips.map((trip) => (
               <div
                 key={trip.id}
-                className="bg-surface-card rounded-card border border-border p-5 shadow-sm hover:shadow-md transition-shadow"
+                className="bg-surface-card rounded-card border border-border p-5 shadow-sm hover:shadow-md transition-shadow relative"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
@@ -216,17 +215,30 @@ export function Dashboard() {
                         <ExternalLink className="w-4 h-4" />
                       </a>
                     )}
-                    <button
-                      onClick={() => copyShareLink(trip.share_slug)}
-                      className="p-2 rounded-lg hover:bg-surface-muted transition-colors text-text-muted hover:text-primary cursor-pointer"
-                      title="Copy share link"
-                    >
-                      {copiedSlug === trip.share_slug ? (
-                        <Check className="w-4 h-4 text-green-600" />
-                      ) : (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => toggleShareMenu(trip.id, "header")}
+                        className={cn(
+                          "p-2 rounded-lg transition-colors cursor-pointer",
+                          shareMenu?.tripId === trip.id && shareMenu.from === "header"
+                            ? "bg-primary/10 text-primary"
+                            : "hover:bg-surface-muted text-text-muted hover:text-primary",
+                        )}
+                        title="Share trip"
+                        aria-expanded={shareMenu?.tripId === trip.id && shareMenu.from === "header"}
+                      >
                         <Share2 className="w-4 h-4" />
+                      </button>
+                      {shareMenu?.tripId === trip.id && shareMenu.from === "header" && (
+                        <TripShareDropdown
+                          tripId={trip.id}
+                          shareSlug={trip.share_slug}
+                          onClose={() => setShareMenu(null)}
+                          className="absolute right-0 top-full z-50 mt-2 w-[min(calc(100vw-2.5rem),22rem)]"
+                        />
                       )}
-                    </button>
+                    </div>
                   </div>
                 </div>
 
@@ -244,14 +256,30 @@ export function Dashboard() {
                     >
                       Edit
                     </Link>
-                    <button
-                      type="button"
-                      onClick={() => copyShareLink(trip.share_slug)}
-                      className="flex flex-1 items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-surface-muted text-text-muted text-sm font-medium hover:bg-surface-muted/80 hover:text-text transition-colors cursor-pointer"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      Share
-                    </button>
+                    <div className="relative flex-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleShareMenu(trip.id, "row")}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-sm font-medium transition-colors cursor-pointer",
+                          shareMenu?.tripId === trip.id && shareMenu.from === "row"
+                            ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                            : "bg-surface-muted text-text-muted hover:bg-surface-muted/80 hover:text-text",
+                        )}
+                        aria-expanded={shareMenu?.tripId === trip.id && shareMenu.from === "row"}
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        Share
+                      </button>
+                      {shareMenu?.tripId === trip.id && shareMenu.from === "row" && (
+                        <TripShareDropdown
+                          tripId={trip.id}
+                          shareSlug={trip.share_slug}
+                          onClose={() => setShareMenu(null)}
+                          className="absolute right-0 top-full z-50 mt-2 w-[min(calc(100vw-2.5rem),22rem)]"
+                        />
+                      )}
+                    </div>
                   </div>
                   <button
                     type="button"
