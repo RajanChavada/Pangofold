@@ -1,13 +1,8 @@
 import { motion } from "framer-motion";
-import { X, Wallet, ClipboardList, Utensils, Compass, MapPinned } from "lucide-react";
+import { X, ClipboardList, Utensils, Compass, ImageIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
-export type TripLogAction =
-  | "journal"
-  | "checkin_full"
-  | "checkin_food"
-  | "checkin_activity"
-  | "checkin_plan";
+export type TripLogAction = "journal" | "checkin_full" | "checkin_food" | "checkin_activity";
 
 interface TripLogActionsSheetProps {
   open: boolean;
@@ -15,36 +10,30 @@ interface TripLogActionsSheetProps {
   onSelect: (action: TripLogAction) => void;
 }
 
-const ROWS: { action: TripLogAction; icon: typeof Wallet; title: string; subtitle: string }[] = [
+const ROWS: { action: TripLogAction; icon: typeof Utensils; title: string; subtitle: string }[] = [
   {
     action: "journal",
-    icon: Wallet,
-    title: "Expense or memory",
-    subtitle: "Photos, amounts, split — saved to the trip journal",
+    icon: ImageIcon,
+    title: "Memory",
+    subtitle: "Title, photo, short description — quick capture",
   },
   {
     action: "checkin_full",
     icon: ClipboardList,
     title: "Full day check-in",
-    subtitle: "Mood, steps, food, funniest moment…",
+    subtitle: "Mood, steps, daily food & funniest moment (separate from meal logs)",
   },
   {
     action: "checkin_food",
     icon: Utensils,
-    title: "Food highlight",
-    subtitle: "Best bite — optionally tie it to the itinerary",
+    title: "Food & expense",
+    subtitle: "Bill, split, rating, photos — saved to the journal",
   },
   {
     action: "checkin_activity",
     icon: Compass,
     title: "Activity moment",
-    subtitle: "What you did — hike, show, wander…",
-  },
-  {
-    action: "checkin_plan",
-    icon: MapPinned,
-    title: "On the itinerary",
-    subtitle: "Connect your note to a planned stop",
+    subtitle: "Link a plan stop or name it yourself — journal entry",
   },
 ];
 

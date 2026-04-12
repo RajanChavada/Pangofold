@@ -7,6 +7,24 @@ import { getSavedToken } from "../hooks/useMemberIdentity";
 
 const TEAL = "#2DD4BF";
 
+function formatSaveError(err: unknown): string {
+  if (err && typeof err === "object") {
+    const o = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts: string[] = [];
+    if (o.message) parts.push(o.message);
+    if (o.details) parts.push(o.details);
+    if (o.hint) parts.push(`Hint: ${o.hint}`);
+    let s = parts.length ? parts.join(" — ") : "Could not save check-in.";
+    if (/does not exist|42883|PGRST202/i.test(s + (o.code ?? ""))) {
+      s +=
+        " Your project may need migration 007 (daily_logs + guest_upsert_daily_log). Apply it in Supabase SQL.";
+    }
+    return s;
+  }
+  if (err instanceof Error) return err.message;
+  return "Could not save check-in.";
+}
+
 const MOODS = [
   { score: 1, emoji: "😤", label: "Rough" },
   { score: 2, emoji: "😐", label: "Meh" },
@@ -175,7 +193,7 @@ export function DailyLogModal({
       }
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save check-in.");
+      setError(formatSaveError(err));
     } finally {
       setSaving(false);
     }

@@ -196,23 +196,18 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
           transition={{ type: "spring", stiffness: 360, damping: 36 }}
-          className="absolute bottom-0 left-0 right-0 max-h-[94dvh] bg-[#0f0f0f] rounded-t-3xl overflow-hidden flex flex-col"
+          className="absolute bottom-0 left-0 right-0 max-h-[94dvh] bg-surface-card rounded-t-3xl overflow-hidden flex flex-col"
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="relative flex-shrink-0">
             {/* Avatar + gradient */}
-            <div
-              className="h-32 w-full relative overflow-hidden"
-              style={{
-                background: "linear-gradient(160deg, #0d2b29 0%, #111 100%)",
-              }}
-            >
+            <div className="h-32 w-full relative overflow-hidden bg-gradient-to-br from-teal-100 via-cyan-50 to-surface">
               <div
-                className="absolute inset-0 opacity-30"
+                className="absolute inset-0 opacity-40"
                 style={{
-                  background: `radial-gradient(circle at 30% 60%, ${TEAL}40, transparent 70%)`,
+                  background: `radial-gradient(circle at 30% 60%, ${TEAL}35, transparent 70%)`,
                 }}
               />
 
@@ -220,7 +215,7 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
               <button
                 type="button"
                 onClick={onClose}
-                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors"
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-surface-card/90 border border-border flex items-center justify-center text-text-muted hover:text-text transition-colors shadow-sm"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -233,10 +228,10 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
           </div>
 
           {/* Name row */}
-          <div className="px-5 pt-10 pb-4 flex-shrink-0 border-b border-white/5">
+          <div className="px-5 pt-10 pb-4 flex-shrink-0 border-b border-border">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <h2 className="text-xl font-black text-white">{member.displayName ?? "—"}</h2>
+                <h2 className="text-xl font-black text-text">{member.displayName ?? "—"}</h2>
                 {member.onboardingPromptAnswer && (
                   <p className="text-sm text-teal-400/80 mt-0.5">{member.onboardingPromptAnswer}</p>
                 )}
@@ -248,7 +243,7 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
                         value={blurbDraft}
                         onChange={(e) => setBlurbDraft(e.target.value.slice(0, 280))}
                         rows={2}
-                        className="flex-1 bg-white/[0.06] border border-teal-400/40 rounded-xl px-3 py-2 text-sm text-white resize-none focus:outline-none"
+                        className="flex-1 bg-surface border border-teal-400/40 rounded-xl px-3 py-2 text-sm text-text resize-none focus:outline-none"
                       />
                       <button
                         type="button"
@@ -264,17 +259,17 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
                     <button
                       type="button"
                       onClick={() => { setBlurbDraft(currentBlurb); setEditingBlurb(true); }}
-                      className="flex items-center gap-1.5 text-xs text-white/35 hover:text-white/60 transition-colors"
+                      className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-muted transition-colors"
                     >
                       {currentBlurb || (
-                        <span className="italic text-white/20">Add a bio blurb…</span>
+                        <span className="italic text-text-muted">Add a bio blurb…</span>
                       )}
                       <Pencil className="w-3 h-3" />
                     </button>
                   )}
                 </div>
                 {member.funFact && (
-                  <p className="text-xs text-white/30 mt-1.5 italic">"{member.funFact}"</p>
+                  <p className="text-xs text-text-muted mt-1.5 italic">"{member.funFact}"</p>
                 )}
               </div>
             </div>
@@ -295,21 +290,21 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
             {totalPaidCents > 0 && (
               <Section title="Spend summary" icon="💳">
                 <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="rounded-2xl bg-white/[0.04] border border-white/8 p-3 text-center">
-                    <p className="text-[10px] text-white/40 uppercase tracking-wide mb-1">Total</p>
-                    <p className="text-base font-bold text-white tabular-nums">
+                  <div className="rounded-2xl bg-surface-muted border border-border p-3 text-center">
+                    <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Total</p>
+                    <p className="text-base font-bold text-text tabular-nums">
                       {fmt(totalPaidCents)}
                     </p>
                   </div>
-                  <div className="rounded-2xl bg-white/[0.04] border border-white/8 p-3 text-center">
-                    <p className="text-[10px] text-white/40 uppercase tracking-wide mb-1">Biggest</p>
-                    <p className="text-sm font-bold text-white tabular-nums truncate">
+                  <div className="rounded-2xl bg-surface-muted border border-border p-3 text-center">
+                    <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Biggest</p>
+                    <p className="text-sm font-bold text-text tabular-nums truncate">
                       {biggestExpense ? fmt(biggestExpense.amountCents ?? 0) : "—"}
                     </p>
                   </div>
-                  <div className="rounded-2xl bg-white/[0.04] border border-white/8 p-3 text-center">
-                    <p className="text-[10px] text-white/40 uppercase tracking-wide mb-1">Receipts</p>
-                    <p className="text-base font-bold text-white">{receipts.length}</p>
+                  <div className="rounded-2xl bg-surface-muted border border-border p-3 text-center">
+                    <p className="text-[10px] text-text-muted uppercase tracking-wide mb-1">Receipts</p>
+                    <p className="text-base font-bold text-text">{receipts.length}</p>
                   </div>
                 </div>
                 {/* Category bars */}
@@ -318,10 +313,10 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
                   .map(([cat, cents]) => (
                     <div key={cat} className="mb-2">
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="capitalize text-white/60">{cat}</span>
-                        <span className="text-white/60 tabular-nums">{fmt(cents)}</span>
+                        <span className="capitalize text-text-muted">{cat}</span>
+                        <span className="text-text-muted tabular-nums">{fmt(cents)}</span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                      <div className="h-1.5 rounded-full bg-surface overflow-hidden">
                         <motion.div
                           className="h-full rounded-full"
                           style={{ background: SPEND_COLORS[cat] ?? "#6b7280" }}
@@ -344,7 +339,7 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
                       key={p.id}
                       type="button"
                       onClick={() => setLightboxUrl(p.publicUrl ?? null)}
-                      className="aspect-square rounded-2xl overflow-hidden border border-white/8"
+                      className="aspect-square rounded-2xl overflow-hidden border border-border"
                     >
                       <img
                         src={p.publicUrl!}
@@ -367,17 +362,17 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
                       key={r.id}
                       type="button"
                       onClick={() => r.publicUrl && setLightboxUrl(r.publicUrl)}
-                      className="relative aspect-square rounded-xl overflow-hidden border border-white/8 group"
+                      className="relative aspect-square rounded-xl overflow-hidden border border-border group"
                     >
                       {r.publicUrl ? (
                         <img src={r.publicUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                       ) : (
-                        <div className="w-full h-full bg-white/[0.04] flex items-center justify-center">
-                          <Receipt className="w-5 h-5 text-white/20" />
+                        <div className="w-full h-full bg-surface-muted flex items-center justify-center">
+                          <Receipt className="w-5 h-5 text-text-muted" />
                         </div>
                       )}
                       {r.amountCents != null && (
-                        <div className="absolute bottom-0 inset-x-0 bg-black/60 text-[10px] text-white text-center py-1">
+                        <div className="absolute bottom-0 inset-x-0 bg-black/60 text-[10px] text-text text-center py-1">
                           {fmt(r.amountCents)}
                         </div>
                       )}
@@ -418,10 +413,10 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
               <button
                 type="button"
                 onClick={() => setShowWrapped(true)}
-                className="w-full py-4 rounded-2xl flex items-center justify-between px-5 font-semibold text-sm text-white border border-white/10 hover:border-teal-400/30 hover:bg-teal-500/5 transition-colors group"
+                className="w-full py-4 rounded-2xl flex items-center justify-between px-5 font-semibold text-sm text-text border border-border hover:border-teal-400/30 hover:bg-teal-500/5 transition-colors group"
               >
                 <span>✦ View my personal Wrapped</span>
-                <ChevronRight className="w-4 h-4 text-white/30 group-hover:text-teal-400 transition-colors" />
+                <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-teal-400 transition-colors" />
               </button>
             </div>
 
@@ -431,7 +426,7 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
                 <button
                   type="button"
                   onClick={onSwitch}
-                  className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm text-white/40 border border-white/8 hover:bg-white/[0.04] transition-colors"
+                  className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm text-text-muted border border-border hover:bg-surface-muted transition-colors"
                 >
                   <SwitchCamera className="w-4 h-4" />
                   Switch to a different person
@@ -509,7 +504,7 @@ function MemberAvatar({ member, size }: { member: TripMember; size: number }) {
         />
       ) : (
         <div
-          className="w-full h-full flex items-center justify-center font-bold text-white"
+          className="w-full h-full flex items-center justify-center font-bold text-text"
           style={{
             background: `linear-gradient(135deg, ${TEAL}, #0891b2)`,
             fontSize: size * 0.32,
@@ -524,9 +519,9 @@ function MemberAvatar({ member, size }: { member: TripMember; size: number }) {
 
 function StatBadge({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="flex-1 rounded-2xl bg-white/[0.04] border border-white/8 px-3 py-2 text-center">
-      <p className="text-base font-bold text-white">{value}</p>
-      <p className="text-[10px] text-white/35 uppercase tracking-wide">{label}</p>
+    <div className="flex-1 rounded-2xl bg-surface-muted border border-border px-3 py-2 text-center">
+      <p className="text-base font-bold text-text">{value}</p>
+      <p className="text-[10px] text-text-muted uppercase tracking-wide">{label}</p>
     </div>
   );
 }
@@ -541,10 +536,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="px-5 py-4 border-b border-white/5">
+    <div className="px-5 py-4 border-b border-border">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-base">{icon}</span>
-        <h3 className="text-sm font-bold text-white">{title}</h3>
+        <h3 className="text-sm font-bold text-text">{title}</h3>
       </div>
       {children}
     </div>
@@ -578,7 +573,7 @@ function DailyLogEntry({
   });
 
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.02] overflow-hidden">
+    <div className="rounded-2xl border border-border bg-surface-muted/50 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -587,19 +582,19 @@ function DailyLogEntry({
         <div className="flex items-center gap-3">
           <span className="text-lg">{log.moodScore ? MOOD_EMOJI[log.moodScore] : "📅"}</span>
           <div>
-            <p className="text-sm font-semibold text-white">Day {dayIndex + 1}</p>
-            <p className="text-xs text-white/35">{dateLabel}</p>
+            <p className="text-sm font-semibold text-text">Day {dayIndex + 1}</p>
+            <p className="text-xs text-text-muted">{dateLabel}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {log.stepsCount && (
-            <span className="text-xs text-white/30 flex items-center gap-1">
+            <span className="text-xs text-text-muted flex items-center gap-1">
               <Footprints className="w-3 h-3" />
               {log.stepsCount.toLocaleString()}
             </span>
           )}
           <ChevronRight
-            className={cn("w-4 h-4 text-white/20 transition-transform", expanded && "rotate-90")}
+            className={cn("w-4 h-4 text-text-muted transition-transform", expanded && "rotate-90")}
           />
         </div>
       </button>
@@ -613,7 +608,7 @@ function DailyLogEntry({
             transition={{ duration: 0.22, ease: "easeInOut" }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 space-y-2 border-t border-white/5 pt-3">
+            <div className="px-4 pb-4 space-y-2 border-t border-border pt-3">
               {(log.linkedItineraryItemId || linkedPlanTitle) && (
                 <LogLine
                   emoji="📍"
@@ -649,8 +644,8 @@ function LogLine({ emoji, label, text }: { emoji: string; label: string; text: s
     <div className="flex gap-2">
       <span className="text-sm shrink-0">{emoji}</span>
       <div>
-        <span className="text-[10px] text-white/30 uppercase tracking-wide mr-1">{label}</span>
-        <span className="text-xs text-white/70">{text}</span>
+        <span className="text-[10px] text-text-muted uppercase tracking-wide mr-1">{label}</span>
+        <span className="text-xs text-text/70">{text}</span>
       </div>
     </div>
   );

@@ -1,22 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, animate, motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import type { DailyLog, JournalEntry, TripMember } from "@pangofold/shared";
 import { cn } from "../../lib/cn";
+import { exportStoryCardAsZip } from "../../lib/wrapped-export";
 
 const TEAL = "#2DD4BF";
 
 const MOOD_EMOJI = ["", "😤", "😐", "🙂", "😁", "🤩"];
 
-// Per-card gradient identities for personal Wrapped
+// Per-card light gradients (matches trip shell)
 const PERSONAL_THEMES = [
-  { gradient: "from-[#0d2b29] via-[#0a3b37] to-[#061a18]", accent: "text-teal-300" }, // intro — deep teal
-  { gradient: "from-[#1e1040] via-[#2d1a60] to-[#0f0820]", accent: "text-violet-300" }, // spend — deep purple
-  { gradient: "from-[#1a0e00] via-[#2d1c00] to-[#0f0800]", accent: "text-amber-300" }, // food — warm amber
-  { gradient: "from-[#0a0a0a] via-[#141414] to-[#0d0d0d]", accent: "text-white/60" }, // photos — dark charcoal
-  { gradient: "from-[#1a0b2e] via-[#2d1050] to-[#110620]", accent: "text-purple-300" }, // funniest — dark violet
-  { gradient: "from-[#0a1520] via-[#0f2030] to-[#060d15]", accent: "text-sky-300" }, // steps — navy
-  { gradient: "from-[#0d2b29] via-[#0a3b37] to-[#061a18]", accent: "text-teal-300" }, // outro — teal
+  { gradient: "from-teal-50 via-cyan-50 to-emerald-50", accent: "text-teal-700" },
+  { gradient: "from-violet-50 via-purple-50 to-fuchsia-50", accent: "text-violet-700" },
+  { gradient: "from-amber-50 via-orange-50 to-rose-50", accent: "text-amber-800" },
+  { gradient: "from-slate-100 via-slate-50 to-zinc-100", accent: "text-slate-600" },
+  { gradient: "from-indigo-50 via-violet-50 to-purple-50", accent: "text-indigo-700" },
+  { gradient: "from-sky-50 via-blue-50 to-indigo-50", accent: "text-sky-700" },
+  { gradient: "from-teal-50 via-emerald-50 to-cyan-50", accent: "text-teal-700" },
 ];
 
 type PersonalSlide =
@@ -134,6 +135,8 @@ interface PersonalWrappedProps {
 export function PersonalWrapped({ member, entries, dailyLogs, onClose }: PersonalWrappedProps) {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
+  const [exporting, setExporting] = useState(false);
+  const cardCaptureRef = useRef<HTMLDivElement>(null);
 
   const slides = useMemo(() => buildPersonalSlides(entries, dailyLogs), [entries, dailyLogs]);
 
@@ -175,6 +178,32 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
 
+  const handleExportZip = useCallback(async () => {
+    const el = cardCaptureRef.current;
+    if (!el || slides.length === 0 || exporting) return;
+    const restoreIndex = index;
+    setExporting(true);
+    try {
+      const safeName = (member.displayName ?? "you")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 32);
+      await exportStoryCardAsZip({
+        cardElement: el,
+        slideCount: slides.length,
+        setSlideIndex: setIndex,
+        restoreIndex,
+        zipFilename: `personal-wrapped-${safeName || "export"}.zip`,
+        filePrefix: "personal-wrapped",
+      });
+    } catch (e) {
+      console.error("Personal Wrapped export failed", e);
+    } finally {
+      setExporting(false);
+    }
+  }, [slides.length, index, exporting, member.displayName]);
+
   const slideNode = useMemo(() => {
     const g = `bg-gradient-to-br ${theme.gradient}`;
     const sub = theme.accent;
@@ -182,7 +211,7 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
     switch (slide.kind) {
       case "intro":
         return (
-          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-text", g)}>
             {/* Avatar */}
             <div className="relative">
               <div
@@ -221,12 +250,12 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "spend":
         return (
-          <div className={cn("flex h-full flex-col justify-center px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center px-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>You spent</p>
             <div className="text-5xl font-black">
               <AnimatedCents cents={slide.totalCents} />
             </div>
-            <div className="mt-6 rounded-2xl bg-white/8 p-4 border border-white/10">
+            <div className="mt-6 rounded-2xl bg-surface-card/90 p-4 border border-border shadow-sm">
               <p className={cn("text-[10px] uppercase tracking-wide mb-1", sub)}>Biggest expense</p>
               <p className="text-base font-bold">{slide.biggestTitle}</p>
               <p className={cn("text-sm mt-0.5", sub)}>
@@ -240,16 +269,16 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "food":
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>The verdict</p>
             {slide.bestFood && (
-              <div className="rounded-2xl bg-white/8 border border-white/10 p-5">
+              <div className="rounded-2xl bg-surface-card/90 border border-border p-5 shadow-sm">
                 <p className={cn("text-[10px] uppercase tracking-wide mb-2", sub)}>⭐ Best food</p>
                 <p className="text-lg font-bold leading-snug">"{slide.bestFood}"</p>
               </div>
             )}
             {slide.worstFood && (
-              <div className="rounded-2xl bg-white/8 border border-white/10 p-5">
+              <div className="rounded-2xl bg-surface-card/90 border border-border p-5 shadow-sm">
                 <p className={cn("text-[10px] uppercase tracking-wide mb-2", sub)}>💀 Worst food</p>
                 <p className="text-lg font-bold leading-snug">"{slide.worstFood}"</p>
               </div>
@@ -259,7 +288,7 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "photos":
         return (
-          <div className={cn("flex h-full flex-col p-6 text-white", g)}>
+          <div className={cn("flex h-full flex-col p-6 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
               Your reel · {slide.urls.length} photos
             </p>
@@ -281,7 +310,7 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "funniest":
         return (
-          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-white", g)}>
+          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-text", g)}>
             <p className="text-6xl">😂</p>
             <div>
               <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
@@ -299,14 +328,14 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
           day: "numeric",
         });
         return (
-          <div className={cn("flex h-full flex-col justify-center px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center px-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
               You walked
             </p>
             <div className="text-5xl font-black">
               <AnimatedNumber value={slide.total} /> steps
             </div>
-            <div className="mt-6 rounded-2xl bg-white/8 border border-white/10 p-4">
+            <div className="mt-6 rounded-2xl bg-surface-card/90 border border-border p-4 shadow-sm">
               <p className={cn("text-[10px] uppercase tracking-wide mb-1", sub)}>Best day</p>
               <p className="text-xl font-bold">{slide.best.toLocaleString()} steps</p>
               <p className={cn("text-sm mt-0.5", sub)}>{bestDateLabel}</p>
@@ -319,7 +348,7 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
         const peak = Math.max(...slide.scores);
         const peakIdx = slide.scores.indexOf(peak);
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 text-text", g)}>
             <div>
               <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-2", sub)}>
                 Your mood arc
@@ -353,10 +382,9 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "outro":
         return (
-          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-white", g)}>
+          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-text", g)}>
             <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
-              style={{ background: `${TEAL}20`, border: `1px solid ${TEAL}40` }}
+              className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl bg-primary/10 border border-primary/30"
             >
               ✦
             </div>
@@ -380,7 +408,7 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[105] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[105] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
     >
       <motion.div
         initial={{ scale: 0.9, opacity: 0 }}
@@ -390,18 +418,29 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
         className="relative w-full max-w-sm"
       >
         {/* Close */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white/60 hover:text-white"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportZip}
+            disabled={exporting || slides.length === 0}
+            title="Download all slides as PNG (ZIP)"
+            className="w-8 h-8 rounded-full bg-surface-card border border-border shadow-sm flex items-center justify-center text-text-muted hover:text-text disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-surface-card border border-border shadow-sm flex items-center justify-center text-text-muted hover:text-text"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
         {/* Progress bar */}
         <div className="mb-3 flex h-1 gap-1">
           {slides.map((_, i) => (
-            <div key={i} className="flex-1 rounded-full bg-white/20 overflow-hidden">
+            <div key={i} className="flex-1 rounded-full bg-border overflow-hidden">
               <motion.div
                 className="h-full rounded-full"
                 style={{ background: TEAL }}
@@ -412,8 +451,11 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
           ))}
         </div>
 
-        {/* Card */}
-        <div className="relative aspect-[9/16] overflow-hidden rounded-[2rem] border border-white/10 shadow-2xl">
+        {/* Card — capture ref for ZIP export (fixed 9:16 frame) */}
+        <div
+          ref={cardCaptureRef}
+          className="relative aspect-[9/16] overflow-hidden rounded-[2rem] border border-border shadow-xl bg-surface-card"
+        >
           <AnimatePresence initial={false} custom={direction} mode="wait">
             <motion.div
               key={index}
@@ -447,15 +489,15 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
           {/* Arrow hints */}
           {index > 0 && (
-            <ChevronLeft className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30 z-10 pointer-events-none" />
+            <ChevronLeft className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 text-text-muted/50 z-10 pointer-events-none" />
           )}
           {index < slides.length - 1 && (
-            <ChevronRight className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30 z-10 pointer-events-none" />
+            <ChevronRight className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 text-text-muted/50 z-10 pointer-events-none" />
           )}
         </div>
 
-        <p className="text-center text-xs text-white/25 mt-2">
-          {index + 1} / {slides.length} · tap sides or use ← →
+        <p className="text-center text-xs text-text-muted mt-2">
+          {exporting ? "Exporting…" : `${index + 1} / ${slides.length} · tap sides or use ← →`}
         </p>
       </motion.div>
     </motion.div>

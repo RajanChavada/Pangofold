@@ -28,6 +28,8 @@ export interface JournalModalSubmitPayload {
   splitMode: JournalSplitMode;
   paidByName: string | null;
   files: File[];
+  /** When set (e.g. food/activity log modals), links this entry to a plan stop. */
+  itineraryItemId?: string | null;
 }
 
 interface JournalModalProps {
@@ -43,6 +45,8 @@ interface JournalModalProps {
   /** Past names + roster for “Who paid?” datalist. */
   rosterNames?: string[];
   onSubmit: (data: JournalModalSubmitPayload) => Promise<void>;
+  /** Simple memory: title, note, photos, optional rating only (no spend/split UI). */
+  variant?: "full" | "simple";
 }
 
 export function JournalModal({
@@ -55,6 +59,7 @@ export function JournalModal({
   capturedByLabel,
   rosterNames = [],
   onSubmit,
+  variant = "full",
 }: JournalModalProps) {
   const [note, setNote] = useState("");
   const [rating, setRating] = useState<number | null>(null);
@@ -90,11 +95,12 @@ export function JournalModal({
         note,
         rating,
         amountCents: cents !== null && !Number.isNaN(cents) ? cents : null,
-        category: category || null,
+        category: variant === "simple" ? null : category || null,
         splitBetween: Math.max(1, parseInt(split, 10) || defaultSplitCount),
         splitMode,
         paidByName: paidBy.trim() ? paidBy.trim().slice(0, 120) : null,
         files,
+        itineraryItemId: null,
       });
       setNote("");
       setRating(null);
@@ -139,19 +145,21 @@ export function JournalModal({
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-text-muted">Note</label>
+            <label className="text-xs font-medium text-text-muted">
+              {variant === "simple" ? "Description" : "Note"}
+            </label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              rows={3}
+              rows={variant === "simple" ? 4 : 3}
               className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm resize-none"
-              placeholder="What stood out?"
+              placeholder={variant === "simple" ? "A quick memory…" : "What stood out?"}
             />
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-xs font-medium text-text-muted">Rating</label>
-              <div className="mt-1 flex gap-1">
+              <label className="text-xs font-medium text-text-muted">Rating (optional)</label>
+              <div className="mt-1 flex gap-1 flex-wrap">
                 {[1, 2, 3, 4, 5].map((n) => (
                   <button
                     key={n}
@@ -169,70 +177,76 @@ export function JournalModal({
                 ))}
               </div>
             </div>
-            <div className="w-28">
-              <label className="text-xs font-medium text-text-muted">Cost (total)</label>
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-                placeholder="$0"
-              />
-            </div>
+            {variant === "full" && (
+              <div className="w-28">
+                <label className="text-xs font-medium text-text-muted">Cost (total)</label>
+                <input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="$0"
+                />
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-text-muted">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as JournalSpendingCategory)}
-                className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-text-muted">Split (people)</label>
-              <input
-                value={split}
-                onChange={(e) => setSplit(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-                inputMode="numeric"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-text-muted">Split mode</label>
-            <select
-              value={splitMode}
-              onChange={(e) => setSplitMode(e.target.value as JournalSplitMode)}
-              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-            >
-              {SPLIT_MODES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-text-muted">Who paid?</label>
-            <input
-              value={paidBy}
-              onChange={(e) => setPaidBy(e.target.value)}
-              list={datalistId}
-              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-              placeholder="Name (optional)"
-            />
-            <datalist id={datalistId}>
-              {rosterNames.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-          </div>
+          {variant === "full" && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-text-muted">Category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as JournalSpendingCategory)}
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  >
+                    {CATEGORIES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-text-muted">Split (people)</label>
+                  <input
+                    value={split}
+                    onChange={(e) => setSplit(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-text-muted">Split mode</label>
+                <select
+                  value={splitMode}
+                  onChange={(e) => setSplitMode(e.target.value as JournalSplitMode)}
+                  className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                >
+                  {SPLIT_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-text-muted">Who paid?</label>
+                <input
+                  value={paidBy}
+                  onChange={(e) => setPaidBy(e.target.value)}
+                  list={datalistId}
+                  className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="Name (optional)"
+                />
+                <datalist id={datalistId}>
+                  {rosterNames.map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+              </div>
+            </>
+          )}
           <div>
             <label className="text-xs font-medium text-text-muted flex items-center gap-2">
               <Camera className="w-3.5 h-3.5" />

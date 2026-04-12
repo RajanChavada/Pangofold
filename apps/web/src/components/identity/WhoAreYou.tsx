@@ -4,18 +4,14 @@ import { Plus, ChevronRight } from "lucide-react";
 import type { TripMember } from "@pangofold/shared";
 import { cn } from "../../lib/cn";
 
-// Teal palette matching the app accent
 const TEAL = "#2DD4BF";
 
 interface WhoAreYouProps {
   tripTitle: string;
   tripDates?: string;
   members: TripMember[];
-  /** Called when user picks an existing member */
   onSelect: (member: TripMember) => void;
-  /** Called when user taps "I'm someone new" */
   onNewMember: () => void;
-  /** Loading state while fetching members */
   loading?: boolean;
 }
 
@@ -30,7 +26,7 @@ function initials(name: string | null | undefined): string {
 
 function MemberAvatar({
   member,
-  size = 64,
+  size = 72,
   selected,
 }: {
   member: TripMember;
@@ -41,18 +37,13 @@ function MemberAvatar({
   const hasPhoto = member.avatarUrl && !imgError;
 
   return (
-    <div
-      className="relative flex-shrink-0"
-      style={{ width: size, height: size }}
-    >
+    <div className="relative flex-shrink-0 mx-auto" style={{ width: size, height: size }}>
       <motion.div
-        animate={{
-          boxShadow: selected
-            ? `0 0 0 3px ${TEAL}, 0 0 20px ${TEAL}55`
-            : "0 0 0 2px rgba(255,255,255,0.1)",
-        }}
         transition={{ duration: 0.2 }}
-        className="w-full h-full rounded-full overflow-hidden"
+        className={cn(
+          "w-full h-full rounded-full overflow-hidden bg-surface-muted",
+          selected ? "ring-[3px] ring-primary shadow-md" : "ring-2 ring-border",
+        )}
       >
         {hasPhoto ? (
           <img
@@ -67,8 +58,8 @@ function MemberAvatar({
             style={{
               background: selected
                 ? `linear-gradient(135deg, ${TEAL}, #0891b2)`
-                : "linear-gradient(135deg, #374151, #1f2937)",
-              fontSize: size * 0.32,
+                : "linear-gradient(135deg, #94a3b8, #64748b)",
+              fontSize: size * 0.28,
             }}
           >
             {initials(member.displayName)}
@@ -77,8 +68,8 @@ function MemberAvatar({
       </motion.div>
       {selected && (
         <motion.div
-          layoutId="selected-ring"
-          className="absolute inset-[-3px] rounded-full border-2"
+          layoutId="selected-ring-who"
+          className="absolute inset-[-4px] rounded-full border-2 pointer-events-none"
           style={{ borderColor: TEAL }}
           transition={{ type: "spring", stiffness: 400, damping: 30 }}
         />
@@ -97,14 +88,13 @@ export function WhoAreYou({
 }: WhoAreYouProps) {
   const [selected, setSelected] = useState<TripMember | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
-  // Scroll selected card into view
   useEffect(() => {
-    if (!selected || !scrollRef.current) return;
+    if (!selected || !gridRef.current) return;
     const idx = members.findIndex((m) => m.id === selected.id);
-    const cards = scrollRef.current.querySelectorAll("[data-member-card]");
-    cards[idx]?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const cards = gridRef.current.querySelectorAll("[data-member-card]");
+    cards[idx]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selected, members]);
 
   const handleEnter = () => {
@@ -117,186 +107,167 @@ export function WhoAreYou({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-[#0d0d0d]">
-      {/* Background texture */}
-      <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
-        style={{
-          backgroundImage: "radial-gradient(circle at 50% 50%, #2DD4BF 0%, transparent 70%)",
-          backgroundSize: "100% 100%",
-        }}
-      />
-
+    <div className="fixed inset-0 z-[70] flex flex-col bg-surface">
       <motion.div
-        initial={{ opacity: 0, y: 24 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative w-full max-w-md px-6 flex flex-col items-center"
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+        className="relative flex flex-col flex-1 min-h-0 w-full max-w-lg mx-auto"
       >
-        {/* Header */}
-        <div className="text-center mb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-teal-400 mb-3">
-            Pangofold
-          </p>
-          <h1 className="text-4xl font-black text-white mb-2 tracking-tight">Who are you?</h1>
-          <p className="text-sm text-white/50">{tripTitle}</p>
-          {tripDates && (
-            <p className="text-xs text-white/30 mt-1">{tripDates}</p>
+        {/* Static header */}
+        <div className="flex-shrink-0 px-6 pt-8 pb-4 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-primary mb-2">Pangofold</p>
+          <h1 className="text-3xl sm:text-4xl font-black text-text mb-2 tracking-tight">Who are you?</h1>
+          <p className="text-sm text-text-muted break-words px-1">{tripTitle}</p>
+          {tripDates && <p className="text-xs text-text-muted/80 mt-1">{tripDates}</p>}
+        </div>
+
+        {/* Scrollable profile grid */}
+        <div ref={gridRef} className="flex-1 min-h-0 overflow-y-auto px-4 pb-2">
+          {loading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="aspect-[4/5] rounded-2xl bg-surface-muted animate-pulse border border-border" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 auto-rows-fr">
+              {members.map((member) => {
+                const isSelected = selected?.id === member.id;
+                return (
+                  <motion.button
+                    key={member.id}
+                    data-member-card
+                    type="button"
+                    onClick={() => setSelected(isSelected ? null : member)}
+                    className={cn(
+                      "flex flex-col items-center gap-2 p-3 rounded-2xl border text-left transition-colors cursor-pointer min-h-[140px]",
+                      isSelected
+                        ? "bg-primary/10 border-primary shadow-sm"
+                        : "bg-surface-card border-border hover:bg-surface-muted/80",
+                    )}
+                    whileTap={{ scale: 0.97 }}
+                  >
+                    <MemberAvatar member={member} size={72} selected={isSelected} />
+                    <div className="text-center w-full min-w-0">
+                      <p className="text-sm font-bold text-text break-words line-clamp-2 leading-snug">
+                        {member.displayName ?? "Unknown"}
+                      </p>
+                      {member.onboardingPromptAnswer && (
+                        <p className="text-[11px] text-text-muted mt-1 leading-snug line-clamp-2 break-words">
+                          {member.onboardingPromptAnswer}
+                        </p>
+                      )}
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* Member cards — scrollable horizontal carousel */}
-        {loading ? (
-          <div className="flex gap-4 overflow-x-auto pb-4 w-full">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="flex-shrink-0 w-[140px] h-[180px] rounded-2xl bg-white/5 animate-pulse"
-              />
-            ))}
-          </div>
-        ) : (
-          <div
-            ref={scrollRef}
-            className="flex gap-3 overflow-x-auto pb-4 w-full snap-x snap-mandatory"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {members.map((member) => {
-              const isSelected = selected?.id === member.id;
-              return (
-                <motion.button
-                  key={member.id}
-                  data-member-card
-                  type="button"
-                  onClick={() => setSelected(isSelected ? null : member)}
-                  className={cn(
-                    "flex-shrink-0 snap-center w-[140px] flex flex-col items-center gap-3 p-4 rounded-2xl border transition-colors cursor-pointer",
-                    isSelected
-                      ? "bg-white/10 border-teal-400/60"
-                      : "bg-white/[0.04] border-white/10 hover:bg-white/[0.07]",
-                  )}
-                  whileTap={{ scale: 0.96 }}
-                >
-                  <MemberAvatar member={member} size={64} selected={isSelected} />
-                  <div className="text-center w-full min-w-0">
-                    <p className="text-sm font-bold text-white truncate">
-                      {member.displayName ?? "Unknown"}
-                    </p>
-                    {member.onboardingPromptAnswer && (
-                      <p className="text-[11px] text-white/40 mt-1 leading-snug line-clamp-2">
-                        {member.onboardingPromptAnswer}
-                      </p>
-                    )}
-                  </div>
-                </motion.button>
-              );
-            })}
-
-            {/* "I'm someone new" card */}
-            <motion.button
-              type="button"
-              onClick={onNewMember}
-              className="flex-shrink-0 snap-center w-[140px] flex flex-col items-center justify-center gap-3 p-4 rounded-2xl border border-dashed border-white/20 bg-transparent hover:bg-white/[0.04] cursor-pointer transition-colors"
-              whileTap={{ scale: 0.96 }}
-            >
-              <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/30 flex items-center justify-center">
-                <Plus className="w-6 h-6 text-white/40" />
-              </div>
-              <p className="text-[12px] text-white/40 text-center leading-snug">
-                I'm someone new
-              </p>
-            </motion.button>
-          </div>
-        )}
-
-        {/* Action buttons */}
-        <div className="mt-6 w-full flex flex-col gap-3">
+        {/* Static footer: actions + add profile */}
+        <div className="flex-shrink-0 px-4 pb-6 pt-3 border-t border-border bg-surface space-y-3">
           <AnimatePresence>
             {selected && (
-              <motion.button
-                key="enter"
-                type="button"
-                onClick={handleEnter}
-                disabled={confirming}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                transition={{ duration: 0.2 }}
-                className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60"
-                style={{
-                  background: confirming
-                    ? `linear-gradient(135deg, #0891b2, #0e7490)`
-                    : `linear-gradient(135deg, ${TEAL}, #0891b2)`,
-                }}
-                whileTap={{ scale: 0.98 }}
+              <motion.div
+                key="actions"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="flex flex-col gap-2 overflow-hidden"
               >
-                {confirming ? (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                    className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
-                  />
-                ) : (
-                  <>
-                    Enter as {selected.displayName}
-                    <ChevronRight className="w-4 h-4" />
-                  </>
-                )}
-              </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={handleEnter}
+                  disabled={confirming}
+                  className="w-full py-3.5 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60 shadow-sm"
+                  style={{
+                    background: confirming
+                      ? "linear-gradient(135deg, #0891b2, #0e7490)"
+                      : `linear-gradient(135deg, ${TEAL}, #0891b2)`,
+                  }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {confirming ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                      className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                    />
+                  ) : (
+                    <>
+                      Enter as {selected.displayName}
+                      <ChevronRight className="w-4 h-4" />
+                    </>
+                  )}
+                </motion.button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  className="w-full py-2.5 rounded-2xl text-sm text-text-muted border border-border bg-surface-card hover:bg-surface-muted transition-colors"
+                >
+                  Not me — switch
+                </button>
+              </motion.div>
             )}
           </AnimatePresence>
 
-          {selected && (
-            <motion.button
-              type="button"
-              onClick={() => setSelected(null)}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="w-full py-3 rounded-2xl text-sm text-white/50 border border-white/10 hover:bg-white/[0.04] transition-colors"
-            >
-              Not me — switch
-            </motion.button>
-          )}
+          {/* Always-visible add profile */}
+          <motion.button
+            type="button"
+            onClick={onNewMember}
+            className="w-full flex flex-col items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer"
+            whileTap={{ scale: 0.99 }}
+          >
+            <div className="w-14 h-14 rounded-full border-2 border-dashed border-primary/50 flex items-center justify-center bg-surface-card">
+              <Plus className="w-7 h-7 text-primary" />
+            </div>
+            <span className="text-sm font-semibold text-primary">Add new profile</span>
+            <span className="text-[11px] text-text-muted text-center px-2">Someone new on this trip</span>
+          </motion.button>
 
           {!selected && !loading && members.length === 0 && (
-            <p className="text-center text-sm text-white/30">
-              No profiles yet — tap "I'm someone new" to get started.
-            </p>
+            <p className="text-center text-sm text-text-muted">No profiles yet — use Add new profile above.</p>
           )}
-        </div>
 
-        <p className="mt-8 text-[11px] text-white/20 text-center">
-          Identity is trip-scoped. You can switch anytime from your profile.
-        </p>
+          <p className="text-[11px] text-text-muted text-center leading-relaxed px-1">
+            Identity is trip-scoped. You can switch anytime from your profile.
+          </p>
+        </div>
       </motion.div>
     </div>
   );
 }
 
-// ── Compact inline variant for owner banner ──────────────────────────────────
-
 export function MemberAvatarBadge({
   member,
-  size = 36,
+  size,
+  className,
   onClick,
 }: {
   member: TripMember;
+  /** Pixel size; omit to use responsive default (larger on small screens). */
   size?: number;
+  className?: string;
   onClick?: () => void;
 }) {
   const [imgError, setImgError] = useState(false);
   const hasPhoto = member.avatarUrl && !imgError;
+  const px = size ?? null;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="relative flex-shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-teal-400"
-      style={{ width: size, height: size }}
+      className={cn(
+        "relative flex-shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2",
+        px == null && "w-12 h-12 md:w-9 md:h-9",
+        className,
+      )}
+      style={px != null ? { width: px, height: px } : undefined}
     >
-      <div
-        className="w-full h-full rounded-full overflow-hidden ring-2 ring-teal-400/60"
-      >
+      <div className="w-full h-full rounded-full overflow-hidden ring-2 ring-primary/50 shadow-sm">
         {hasPhoto ? (
           <img
             src={member.avatarUrl!}
@@ -306,9 +277,13 @@ export function MemberAvatarBadge({
           />
         ) : (
           <div
-            className="w-full h-full flex items-center justify-center font-bold text-white text-xs"
+            className={cn(
+              "w-full h-full flex items-center justify-center font-bold text-white",
+              px == null ? "text-sm md:text-xs" : "text-xs",
+            )}
             style={{
               background: `linear-gradient(135deg, ${TEAL}, #0891b2)`,
+              fontSize: px != null ? Math.max(10, px * 0.32) : undefined,
             }}
           >
             {initials(member.displayName)}

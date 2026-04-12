@@ -28,7 +28,9 @@ import { FoodCard } from "../components/FoodCard";
 import { ActivityCard } from "../components/ActivityCard";
 import { HotelCard } from "../components/HotelCard";
 import { SectionHeader } from "../components/SectionHeader";
-import { JournalModal } from "../components/JournalModal";
+import { JournalModal, type JournalModalSubmitPayload } from "../components/JournalModal";
+import { FoodExpenseLogModal } from "../components/FoodExpenseLogModal";
+import { ActivityMomentLogModal } from "../components/ActivityMomentLogModal";
 import { TripMapPanel, collectDestinationMapPoints } from "../components/TripMapPanel";
 import { WhoAreYou, MemberAvatarBadge } from "../components/identity/WhoAreYou";
 import { MemberOnboarding } from "../components/identity/MemberOnboarding";
@@ -96,8 +98,11 @@ export function TripView() {
   const [viewTab, setViewTab] = useState<ViewTab>("itinerary");
   const [itineraryFilter, setItineraryFilter] = useState<ItineraryFilter>("all");
   const [journalOpen, setJournalOpen] = useState(false);
+  const [journalVariant, setJournalVariant] = useState<"full" | "simple">("full");
   const [journalItemId, setJournalItemId] = useState<string | null>(null);
   const [journalDefaultTitle, setJournalDefaultTitle] = useState("");
+  const [foodExpenseOpen, setFoodExpenseOpen] = useState(false);
+  const [activityMomentOpen, setActivityMomentOpen] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
@@ -294,33 +299,84 @@ export function TripView() {
     navigate(`/trip/${dbTrip.id}/report`, { replace: true });
   }, [dbTrip, loading, isCollab, authLoading, user?.id, isMember, navigate, searchParams]);
 
-  const openLog = useCallback((itemId: string | null, defaultTitle: string) => {
-    setJournalItemId(itemId);
-    setJournalDefaultTitle(defaultTitle);
-    setJournalOpen(true);
-  }, []);
+  const openLog = useCallback(
+    (itemId: string | null, defaultTitle: string, variant: "full" | "simple" = "full") => {
+      setJournalItemId(itemId);
+      setJournalDefaultTitle(defaultTitle);
+      setJournalVariant(variant);
+      setJournalOpen(true);
+    },
+    [],
+  );
+
+  const saveJournalPayload = useCallback(
+    async (data: JournalModalSubmitPayload) => {
+      setJournalActionError(null);
+      const itineraryLink = data.itineraryItemId ?? journalItemId ?? null;
+      try {
+        if (isCollab && id && tokenFromUrl && guestName) {
+          const photos = await filesToGuestPhotos(data.files);
+          const { error: fnErr } = await supabase.functions.invoke("guest-journal-submit", {
+            body: {
+              tripId: id,
+              collaborateToken: tokenFromUrl,
+              loggedByName: guestName,
+              title: data.title,
+              note: data.note,
+              rating: data.rating,
+              amountCents: data.amountCents,
+              currency: "USD",
+              category: data.category,
+              splitBetween: data.splitBetween,
+              splitMode: data.splitMode,
+              paidByName: data.paidByName,
+              itineraryItemId: itineraryLink,
+              photos,
+            },
+          });
+          if (fnErr) throw new Error(fnErr.message);
+          await refetchJournal();
+          return;
+        }
+        await createEntry({
+          itineraryItemId: itineraryLink,
+          title: data.title,
+          note: data.note,
+          rating: data.rating,
+          amountCents: data.amountCents,
+          category: data.category ?? undefined,
+          splitBetween: data.splitBetween,
+          splitMode: data.splitMode,
+          paidByName: data.paidByName,
+          files: data.files,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not save log";
+        setJournalActionError(msg);
+        throw err;
+      }
+    },
+    [isCollab, id, tokenFromUrl, guestName, journalItemId, createEntry, refetchJournal],
+  );
 
   const handleTripLogAction = useCallback(
     (action: TripLogAction) => {
       switch (action) {
         case "journal":
-          openLog(null, "New memory");
+          setJournalItemId(null);
+          openLog(null, "New memory", "simple");
           break;
         case "checkin_full":
           setDailyLogFocus("full");
           setDailyLogOpen(true);
           break;
         case "checkin_food":
-          setDailyLogFocus("food");
-          setDailyLogOpen(true);
+          setJournalItemId(null);
+          setFoodExpenseOpen(true);
           break;
         case "checkin_activity":
-          setDailyLogFocus("activity");
-          setDailyLogOpen(true);
-          break;
-        case "checkin_plan":
-          setDailyLogFocus("plan");
-          setDailyLogOpen(true);
+          setJournalItemId(null);
+          setActivityMomentOpen(true);
           break;
         default:
           break;
@@ -636,59 +692,60 @@ export function TripView() {
       )}
 
       <JournalModal
-        key={`${journalItemId ?? "new"}-${isCollab ? "g" : "m"}`}
+        key={`${journalItemId ?? "new"}-${isCollab ? "g" : "m"}-${journalVariant}`}
         open={journalOpen}
         onClose={() => setJournalOpen(false)}
-        title={journalItemId ? "Log this stop" : "Log something new"}
+        title={
+          journalItemId
+            ? "Log this stop"
+            : journalVariant === "simple"
+              ? "Memory"
+              : "Log something new"
+        }
         defaultTitle={journalDefaultTitle}
+        defaultSplitCount={split}
+        subtitle={
+          journalVariant === "simple"
+            ? "A title, a photo, a short line — keep it light."
+            : undefined
+        }
+        capturedByLabel={capturedByLabel}
+        rosterNames={rosterNames}
+        variant={journalVariant}
+        onSubmit={saveJournalPayload}
+      />
+
+      <FoodExpenseLogModal
+        open={foodExpenseOpen}
+        onClose={() => setFoodExpenseOpen(false)}
+        planItemsForDay={
+          day?.items.map((i) => ({
+            id: i.id,
+            title: i.title,
+            time: i.time,
+            category: i.category,
+          })) ?? []
+        }
         defaultSplitCount={split}
         capturedByLabel={capturedByLabel}
         rosterNames={rosterNames}
-        onSubmit={async (data) => {
-          setJournalActionError(null);
-          try {
-            if (isCollab && id && tokenFromUrl && guestName) {
-              const photos = await filesToGuestPhotos(data.files);
-              const { error: fnErr } = await supabase.functions.invoke("guest-journal-submit", {
-                body: {
-                  tripId: id,
-                  collaborateToken: tokenFromUrl,
-                  loggedByName: guestName,
-                  title: data.title,
-                  note: data.note,
-                  rating: data.rating,
-                  amountCents: data.amountCents,
-                  currency: "USD",
-                  category: data.category,
-                  splitBetween: data.splitBetween,
-                  splitMode: data.splitMode,
-                  paidByName: data.paidByName,
-                  itineraryItemId: journalItemId,
-                  photos,
-                },
-              });
-              if (fnErr) throw new Error(fnErr.message);
-              await refetchJournal();
-              return;
-            }
-            await createEntry({
-              itineraryItemId: journalItemId,
-              title: data.title,
-              note: data.note,
-              rating: data.rating,
-              amountCents: data.amountCents,
-              category: data.category ?? undefined,
-              splitBetween: data.splitBetween,
-              splitMode: data.splitMode,
-              paidByName: data.paidByName,
-              files: data.files,
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Could not save log";
-            setJournalActionError(msg);
-            throw err;
-          }
-        }}
+        onSubmit={saveJournalPayload}
+      />
+
+      <ActivityMomentLogModal
+        open={activityMomentOpen}
+        onClose={() => setActivityMomentOpen(false)}
+        planItemsForDay={
+          day?.items.map((i) => ({
+            id: i.id,
+            title: i.title,
+            time: i.time,
+            category: i.category,
+          })) ?? []
+        }
+        defaultSplitCount={split}
+        capturedByLabel={capturedByLabel}
+        onSubmit={saveJournalPayload}
       />
 
       <div className="max-w-lg mx-auto">
@@ -698,7 +755,6 @@ export function TripView() {
             <div className="absolute top-4 right-4">
               <MemberAvatarBadge
                 member={currentMember}
-                size={36}
                 onClick={() => setShowProfileMenu((v) => !v)}
               />
               <AnimatePresence>
@@ -708,48 +764,48 @@ export function TripView() {
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.92, y: -8 }}
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                    className="absolute right-0 top-10 w-52 rounded-2xl bg-[#1a1a1a] border border-white/10 shadow-2xl overflow-hidden z-10"
+                    className="absolute right-0 top-12 md:top-11 w-56 rounded-2xl bg-surface-card border border-border shadow-xl overflow-hidden z-10"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="px-4 py-3 border-b border-white/5">
-                      <p className="text-sm font-bold text-white">{currentMember.displayName}</p>
+                    <div className="px-4 py-3 border-b border-border bg-surface-muted/50">
+                      <p className="text-sm font-bold text-text break-words">{currentMember.displayName}</p>
                       {currentMember.onboardingPromptAnswer && (
-                        <p className="text-xs text-white/40 mt-0.5 line-clamp-1">
+                        <p className="text-xs text-text-muted mt-0.5 line-clamp-2 break-words">
                           {currentMember.onboardingPromptAnswer}
                         </p>
                       )}
                     </div>
                     <button
                       type="button"
-                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-text hover:bg-surface-muted transition-colors text-left"
                       onClick={() => { setProfileOpen(true); setShowProfileMenu(false); }}
                     >
-                      <User className="w-4 h-4 text-teal-400" />
+                      <User className="w-4 h-4 text-primary shrink-0" />
                       View my profile
                     </button>
                     <button
                       type="button"
-                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-text hover:bg-surface-muted transition-colors text-left"
                       onClick={() => {
                         setDailyLogFocus("full");
                         setDailyLogOpen(true);
                         setShowProfileMenu(false);
                       }}
                     >
-                      <ClipboardList className="w-4 h-4 text-teal-400" />
+                      <ClipboardList className="w-4 h-4 text-primary shrink-0" />
                       Daily check-in
                     </button>
                     {isCollab && (
                       <button
                         type="button"
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left border-t border-white/5"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-text hover:bg-surface-muted transition-colors text-left border-t border-border"
                         onClick={() => {
                           logoutMember();
                           setIdentityScreen("who");
                           setShowProfileMenu(false);
                         }}
                       >
-                        <SwitchCamera className="w-4 h-4 text-white/40" />
+                        <SwitchCamera className="w-4 h-4 text-text-muted shrink-0" />
                         Switch person
                       </button>
                     )}

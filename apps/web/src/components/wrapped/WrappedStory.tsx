@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, animate, motion } from "framer-motion";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import type {
   DailyLog,
   JournalEntry,
@@ -18,6 +18,7 @@ import {
   topSpendCategoryForPerson,
 } from "../../lib/wrapped-helpers";
 import { cn } from "../../lib/cn";
+import { exportStoryCardAsZip } from "../../lib/wrapped-export";
 
 const TEAL = "#2DD4BF";
 
@@ -28,23 +29,23 @@ const SUPERLATIVE_LABEL: Record<SuperlativeId, string> = {
   navigator: "The Navigator",
 };
 
-// Per-card gradient identities
+// Per-card light gradients (aligned with app shell)
 const CARD_THEMES: Record<string, { gradient: string; accent: string }> = {
-  intro:       { gradient: "from-amber-500 via-orange-600 to-rose-900", accent: "text-amber-100" },
-  crew:        { gradient: "from-teal-700 via-teal-900 to-slate-950", accent: "text-teal-200" },
-  tripNumbers: { gradient: "from-teal-600 via-emerald-800 to-slate-950", accent: "text-teal-200" },
-  total:       { gradient: "from-violet-600 via-purple-800 to-slate-950", accent: "text-violet-200" },
-  categories:  { gradient: "from-violet-600 via-purple-800 to-slate-950", accent: "text-violet-200" },
-  biggestSpender: { gradient: "from-violet-700 via-indigo-900 to-slate-950", accent: "text-indigo-200" },
-  foodVerdict: { gradient: "from-amber-600 via-orange-800 to-stone-950", accent: "text-amber-200" },
-  person:      { gradient: "from-emerald-600 via-teal-800 to-slate-950", accent: "text-emerald-200" },
-  superlatives:{ gradient: "from-sky-600 via-blue-800 to-indigo-950", accent: "text-sky-200" },
-  settlement:  { gradient: "from-slate-600 via-slate-800 to-slate-950", accent: "text-slate-300" },
-  bestMoment:  { gradient: "from-pink-600 via-fuchsia-800 to-purple-950", accent: "text-pink-200" },
-  funniestMoments: { gradient: "from-violet-800 via-purple-900 to-slate-950", accent: "text-purple-200" },
-  photoGrid:   { gradient: "from-zinc-800 via-zinc-900 to-black", accent: "text-zinc-300" },
-  crewProfiles:{ gradient: "from-teal-700 via-slate-900 to-slate-950", accent: "text-teal-200" },
-  outro:       { gradient: "from-amber-500 via-orange-600 to-rose-900", accent: "text-amber-100" },
+  intro:       { gradient: "from-amber-100 via-orange-50 to-rose-100", accent: "text-amber-900" },
+  crew:        { gradient: "from-teal-100 via-cyan-50 to-slate-100", accent: "text-teal-900" },
+  tripNumbers: { gradient: "from-teal-100 via-emerald-50 to-slate-100", accent: "text-teal-900" },
+  total:       { gradient: "from-violet-100 via-purple-50 to-fuchsia-100", accent: "text-violet-900" },
+  categories:  { gradient: "from-violet-100 via-purple-50 to-indigo-100", accent: "text-violet-900" },
+  biggestSpender: { gradient: "from-indigo-100 via-violet-50 to-purple-100", accent: "text-indigo-900" },
+  foodVerdict: { gradient: "from-amber-100 via-orange-50 to-stone-100", accent: "text-amber-900" },
+  person:      { gradient: "from-emerald-100 via-teal-50 to-cyan-100", accent: "text-emerald-900" },
+  superlatives:{ gradient: "from-sky-100 via-blue-50 to-indigo-100", accent: "text-sky-900" },
+  settlement:  { gradient: "from-slate-100 via-slate-50 to-zinc-100", accent: "text-slate-700" },
+  bestMoment:  { gradient: "from-pink-100 via-fuchsia-50 to-purple-100", accent: "text-pink-900" },
+  funniestMoments: { gradient: "from-violet-100 via-purple-50 to-fuchsia-100", accent: "text-violet-900" },
+  photoGrid:   { gradient: "from-zinc-100 via-stone-50 to-neutral-100", accent: "text-zinc-800" },
+  crewProfiles:{ gradient: "from-teal-100 via-slate-50 to-slate-100", accent: "text-teal-900" },
+  outro:       { gradient: "from-amber-100 via-orange-50 to-rose-100", accent: "text-amber-900" },
 };
 
 function getTheme(kind: string) {
@@ -199,12 +200,12 @@ function LazyPhoto({
         />
       )}
       {err && (
-        <div className="absolute inset-0 bg-white/5 flex items-center justify-center text-white/20 text-xs">
+        <div className="absolute inset-0 bg-white/5 flex items-center justify-center text-text-muted text-xs">
           No photo
         </div>
       )}
       {attribution && loaded && (
-        <div className="absolute bottom-1 right-1 text-[10px] text-white/60 bg-black/40 px-1 rounded-sm">
+        <div className="absolute bottom-1 right-1 text-[10px] text-text-muted bg-black/40 px-1 rounded-sm">
           {attribution}
         </div>
       )}
@@ -221,7 +222,7 @@ function MemberAvatar({ member, size = 40 }: { member: TripMember; size?: number
     .join("");
   return (
     <div
-      className="rounded-full overflow-hidden flex items-center justify-center font-bold text-white shrink-0"
+      className="rounded-full overflow-hidden flex items-center justify-center font-bold text-text shrink-0"
       style={{
         width: size,
         height: size,
@@ -264,6 +265,9 @@ export function WrappedStory({
 }: WrappedStoryProps) {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
+  const [exporting, setExporting] = useState(false);
+  const fallbackCardRef = useRef<HTMLDivElement>(null);
+  const cardRef = exportRef ?? fallbackCardRef;
   const slides = useMemo(
     () => buildSlideList(payload, entries, members, dailyLogs),
     [payload, entries, members, dailyLogs],
@@ -286,6 +290,27 @@ export function WrappedStory({
     },
     [slides.length],
   );
+
+  const handleExportZip = useCallback(async () => {
+    const el = cardRef.current;
+    if (!el || slides.length === 0 || exporting) return;
+    const restoreIndex = index;
+    setExporting(true);
+    try {
+      await exportStoryCardAsZip({
+        cardElement: el,
+        slideCount: slides.length,
+        setSlideIndex: setIndex,
+        restoreIndex,
+        zipFilename: `group-wrapped-${trip.id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12)}.zip`,
+        filePrefix: "wrapped",
+      });
+    } catch (e) {
+      console.error("Wrapped export failed", e);
+    } finally {
+      setExporting(false);
+    }
+  }, [cardRef, slides.length, index, exporting, trip.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -321,7 +346,7 @@ export function WrappedStory({
     switch (slide.kind) {
       case "intro":
         return (
-          <div className={cn("flex h-full flex-col justify-between p-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-between p-8 text-text", g)}>
             <div>
               <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
                 Pangofold Wrapped
@@ -340,7 +365,7 @@ export function WrappedStory({
               {trip.coverImageUrl ? (
                 <LazyPhoto src={trip.coverImageUrl} className="h-full w-full" />
               ) : (
-                <div className="flex h-full items-center justify-center text-sm text-white/40">
+                <div className="flex h-full items-center justify-center text-sm text-text-muted">
                   Your trip
                 </div>
               )}
@@ -350,7 +375,7 @@ export function WrappedStory({
 
       case "crew":
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 text-text", g)}>
             <div>
               <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
                 The crew
@@ -377,7 +402,7 @@ export function WrappedStory({
                   className="flex flex-col items-center gap-2"
                 >
                   <MemberAvatar member={m} size={56} />
-                  <p className="text-xs font-medium text-white/70">{m.displayName ?? "—"}</p>
+                  <p className="text-xs font-medium text-text-muted">{m.displayName ?? "—"}</p>
                 </motion.div>
               ))}
             </div>
@@ -386,7 +411,7 @@ export function WrappedStory({
 
       case "tripNumbers":
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
               The numbers
             </p>
@@ -416,7 +441,7 @@ export function WrappedStory({
 
       case "total":
         return (
-          <div className={cn("flex h-full flex-col justify-center px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center px-8 text-text", g)}>
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Total logged</p>
             <div className="mt-4 text-5xl font-black tabular-nums sm:text-6xl">
               <AnimatedCents cents={payload.totalSpendCents} />
@@ -434,7 +459,7 @@ export function WrappedStory({
           .slice(0, 5);
         const max = sorted[0]?.[1] ?? 1;
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 py-10 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 py-10 text-text", g)}>
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Where it went</p>
             <ul className="space-y-4">
               {sorted.map(([k, v]) => (
@@ -469,7 +494,7 @@ export function WrappedStory({
             (a.photoCount + a.logCount) / Math.max(a.attributedSpendCents, 1),
         )[0];
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
               The tab
             </p>
@@ -515,11 +540,11 @@ export function WrappedStory({
           .filter((l) => l.worstFoodText)
           .sort(() => Math.random() - 0.5)[0];
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-4 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-4 px-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
               Food verdict
             </p>
-            <p className="text-sm font-bold text-white/60 uppercase tracking-wide">
+            <p className="text-sm font-bold text-text-muted uppercase tracking-wide">
               Top bites
             </p>
             <div className="space-y-3">
@@ -533,7 +558,7 @@ export function WrappedStory({
                 >
                   <div className="flex items-center gap-2 mb-1">
                     {m && <MemberAvatar member={m} size={24} />}
-                    <p className="text-[11px] text-white/50">{m?.displayName ?? "Someone"}</p>
+                    <p className="text-[11px] text-text-muted">{m?.displayName ?? "Someone"}</p>
                   </div>
                   <p className="text-sm font-semibold">"{text}"</p>
                 </motion.div>
@@ -559,12 +584,12 @@ export function WrappedStory({
           .filter((l) => l.memberId === memberProfile?.id)
           .reduce((s, l) => s + (l.stepsCount ?? 0), 0);
         return (
-          <div className={cn("flex h-full flex-col text-white", g)}>
+          <div className={cn("flex h-full flex-col text-text", g)}>
             <div className="relative h-[42%] min-h-[160px] w-full overflow-hidden border-b border-white/10">
               {hero ? (
                 <LazyPhoto src={hero} className="h-full w-full" />
               ) : (
-                <div className="flex h-full items-center justify-center bg-black/30 text-sm text-white/40">
+                <div className="flex h-full items-center justify-center bg-black/30 text-sm text-text-muted">
                   {memberProfile ? (
                     <MemberAvatar member={memberProfile} size={80} />
                   ) : (
@@ -587,7 +612,7 @@ export function WrappedStory({
               </div>
               {topCat && (
                 <p className={cn("text-sm", sub)}>
-                  Top category: <strong className="text-white">{topCat}</strong>
+                  Top category: <strong className="text-text">{topCat}</strong>
                 </p>
               )}
               {memberProfile?.onboardingPromptAnswer && (
@@ -611,7 +636,7 @@ export function WrappedStory({
 
       case "superlatives":
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-text", g)}>
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Superlatives</p>
             <ul className="space-y-4">
               {(Object.keys(payload.superlatives) as SuperlativeId[]).map((key, i) => {
@@ -649,7 +674,7 @@ export function WrappedStory({
                   .filter(({ winner }) => winner && winner.logCount > 0)
                   .map(({ label, winner, stat }) => (
                     <div key={label} className={cn("text-xs", sub)}>
-                      {label}: <strong className="text-white">{winner!.name}</strong>{" "}
+                      {label}: <strong className="text-text">{winner!.name}</strong>{" "}
                       ({stat(winner!)})
                     </div>
                   ))}
@@ -660,7 +685,7 @@ export function WrappedStory({
 
       case "settlement":
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-4 px-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-4 px-8 text-text", g)}>
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Settle up</p>
             <ul className="max-h-[min(50vh,320px)] space-y-3 overflow-y-auto pr-1 text-sm">
               {payload.settlement.map((s, i) => (
@@ -677,7 +702,7 @@ export function WrappedStory({
 
       case "bestMoment":
         return (
-          <div className={cn("flex h-full flex-col justify-between p-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-between p-8 text-text", g)}>
             <div>
               <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Best moment</p>
               <p className="mt-6 text-2xl font-bold leading-snug">{payload.bestRated?.title}</p>
@@ -705,11 +730,11 @@ export function WrappedStory({
             moment: l.funniestMoment!,
           }));
         return (
-          <div className={cn("flex h-full flex-col p-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col p-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-2", sub)}>
               Funniest moments
             </p>
-            <p className="text-xs text-white/30 mb-5">Private during the trip · revealed now</p>
+            <p className="text-xs text-text-muted mb-5">Private during the trip · revealed now</p>
             <div className="space-y-3 overflow-y-auto flex-1">
               {byMember.map(({ member: m, moment }, i) => (
                 <motion.div
@@ -722,7 +747,7 @@ export function WrappedStory({
                   {m && (
                     <div className="flex items-center gap-2 mb-2">
                       <MemberAvatar member={m} size={20} />
-                      <p className="text-[11px] text-white/50">{m.displayName}</p>
+                      <p className="text-[11px] text-text-muted">{m.displayName}</p>
                     </div>
                   )}
                   <p className="text-sm font-semibold leading-snug">"{moment}"</p>
@@ -736,7 +761,7 @@ export function WrappedStory({
       case "photoGrid": {
         const urls = journalPhotoUrls(entries, 6);
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-4 p-6 text-white", g)}>
+          <div className={cn("flex h-full flex-col justify-center gap-4 p-6 text-text", g)}>
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>The reel</p>
             <div className="grid grid-cols-3 gap-2">
               {urls.map((url, i) => (
@@ -757,7 +782,7 @@ export function WrappedStory({
 
       case "crewProfiles":
         return (
-          <div className={cn("flex h-full flex-col p-8 text-white", g)}>
+          <div className={cn("flex h-full flex-col p-8 text-text", g)}>
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-6", sub)}>
               The crew
             </p>
@@ -781,7 +806,7 @@ export function WrappedStory({
                         </p>
                       )}
                       {m.funFact && (
-                        <p className="text-xs text-white/30 italic mt-0.5 line-clamp-1">
+                        <p className="text-xs text-text-muted italic mt-0.5 line-clamp-1">
                           {m.funFact}
                         </p>
                       )}
@@ -794,7 +819,7 @@ export function WrappedStory({
 
       case "outro":
         return (
-          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-white", g)}>
+          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-text", g)}>
             <SparklesGlyph />
             <div>
               <p className="text-2xl font-bold">That's a wrap</p>
@@ -813,7 +838,7 @@ export function WrappedStory({
   return (
     <div className="relative w-full">
       {/* Progress bar */}
-      <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-black/10">
+      <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-border/70">
         <motion.div
           className="h-full rounded-full bg-primary"
           animate={{ width: `${((index + 1) / slides.length) * 100}%` }}
@@ -821,12 +846,25 @@ export function WrappedStory({
         />
       </div>
 
-      <p className="mb-2 text-center text-xs text-text-muted">
-        Tap sides or use ← → keys · {index + 1} / {slides.length}
-      </p>
+      <div className="mb-2 flex flex-col items-center gap-2">
+        <p className="text-center text-xs text-text-muted">
+          {exporting
+            ? "Exporting…"
+            : `Tap sides or use ← → keys · ${index + 1} / ${slides.length}`}
+        </p>
+        <button
+          type="button"
+          onClick={handleExportZip}
+          disabled={exporting || slides.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text shadow-sm hover:bg-surface-card/90 disabled:opacity-50"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export ZIP (PNG)
+        </button>
+      </div>
 
       <div
-        ref={exportRef}
+        ref={cardRef}
         className="relative mx-auto aspect-[9/16] w-full max-w-[min(100%,420px)] overflow-hidden rounded-[2rem] border border-border shadow-2xl"
       >
         <AnimatePresence initial={false} custom={direction} mode="wait">
@@ -847,7 +885,7 @@ export function WrappedStory({
         <button
           type="button"
           aria-label="Previous slide"
-          className="absolute left-0 top-0 z-10 flex h-full w-[22%] cursor-w-resize items-center justify-start pl-2 text-white/80 hover:text-white disabled:opacity-0"
+          className="absolute left-0 top-0 z-10 flex h-full w-[22%] cursor-w-resize items-center justify-start pl-2 text-text hover:text-text disabled:opacity-0"
           onClick={() => go(-1)}
           disabled={index <= 0}
         >
@@ -856,7 +894,7 @@ export function WrappedStory({
         <button
           type="button"
           aria-label="Next slide"
-          className="absolute right-0 top-0 z-10 flex h-full w-[22%] cursor-e-resize items-center justify-end pr-2 text-white/80 hover:text-white disabled:opacity-0"
+          className="absolute right-0 top-0 z-10 flex h-full w-[22%] cursor-e-resize items-center justify-end pr-2 text-text hover:text-text disabled:opacity-0"
           onClick={() => go(1)}
           disabled={index >= slides.length - 1}
         >
@@ -871,9 +909,9 @@ export function WrappedStory({
 
 function StatCell({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm">
+    <div className="rounded-xl border border-border bg-surface-card/90 p-3 backdrop-blur-sm shadow-sm">
       <p className={cn("text-[10px] uppercase tracking-wide", sub)}>{label}</p>
-      <p className="text-xl font-bold tabular-nums">{value}</p>
+      <p className="text-xl font-bold tabular-nums text-text">{value}</p>
     </div>
   );
 }
@@ -888,16 +926,16 @@ function NumberTile({
   sub: string;
 }) {
   return (
-    <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+    <div className="rounded-2xl border border-border bg-surface-card/90 p-4 shadow-sm">
       <p className={cn("text-[10px] uppercase tracking-wide mb-1", sub)}>{label}</p>
-      <p className="text-xl font-black">{value}</p>
+      <p className="text-xl font-black text-text">{value}</p>
     </div>
   );
 }
 
 function SparklesGlyph() {
   return (
-    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 text-3xl backdrop-blur-sm">
+    <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 text-3xl text-text backdrop-blur-sm">
       ✦
     </div>
   );
