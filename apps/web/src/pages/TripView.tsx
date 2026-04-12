@@ -641,14 +641,6 @@ export function TripView() {
           memberId={currentMemberId}
           dayNumber={currentDayNumber}
           customPrompt={dbTrip?.dailyLogPrompt ?? undefined}
-          planItemsForDay={
-            day?.items.map((i) => ({
-              id: i.id,
-              title: i.title,
-              time: i.time,
-              category: i.category,
-            })) ?? []
-          }
           initialFocus={dailyLogFocus}
           onClose={() => {
             setDailyLogOpen(false);

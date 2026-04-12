@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { X, Footprints, Star, Skull, Laugh, Camera, MapPin, Compass } from "lucide-react";
+import { X, Footprints, Star, Skull, Laugh, Compass, Plus } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/cn";
 import { getSavedToken } from "../hooks/useMemberIdentity";
+import {
+  parseCheckInPhotoUrls,
+  serializeCheckInPhotoUrls,
+  uploadDailyCheckInPhoto,
+} from "../lib/daily-log-photos";
 
 const TEAL = "#2DD4BF";
 
@@ -17,7 +22,7 @@ function formatSaveError(err: unknown): string {
     let s = parts.length ? parts.join(" — ") : "Could not save check-in.";
     if (/does not exist|42883|PGRST202/i.test(s + (o.code ?? ""))) {
       s +=
-        " Your project may need migration 007 (daily_logs + guest_upsert_daily_log). Apply it in Supabase SQL.";
+        " Apply pending Supabase migrations (007 itinerary columns + 009 guest checklist & daily log photos).";
     }
     return s;
   }
@@ -33,7 +38,7 @@ const MOODS = [
   { score: 5, emoji: "🤩", label: "Best day" },
 ];
 
-export type DailyLogFocus = "full" | "food" | "activity" | "plan";
+export type DailyLogFocus = "full" | "food" | "activity";
 
 export interface PlanItemOption {
   id: string;
@@ -47,7 +52,6 @@ interface DailyLogModalProps {
   memberId: string;
   dayNumber: number;
   customPrompt?: string;
-  planItemsForDay?: PlanItemOption[];
   initialFocus?: DailyLogFocus;
   onClose: () => void;
   onSaved: () => void;
@@ -58,7 +62,6 @@ export function DailyLogModal({
   memberId,
   dayNumber,
   customPrompt,
-  planItemsForDay = [],
   initialFocus = "full",
   onClose,
   onSaved,
@@ -71,17 +74,16 @@ export function DailyLogModal({
   const [worstFood, setWorstFood] = useState("");
   const [funniestMoment, setFunniestMoment] = useState("");
   const [customAnswer, setCustomAnswer] = useState("");
-  const [linkedItemId, setLinkedItemId] = useState<string | null>(null);
   const [activityHighlight, setActivityHighlight] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Receipt photo upload
-  const receiptRef = useRef<HTMLInputElement>(null);
-  const [receiptUploading, setReceiptUploading] = useState(false);
-  const [receiptThumb, setReceiptThumb] = useState<string | null>(null);
+  const [photoRemoteUrls, setPhotoRemoteUrls] = useState<string[]>([]);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
-  // Load existing log for today if any (auth row query or guest RPC)
+  const totalPhotoCount = photoRemoteUrls.length + photoFiles.length;
+
   useEffect(() => {
     const load = async () => {
       const {
@@ -101,11 +103,11 @@ export function DailyLogModal({
       }
       const token = getSavedToken(tripId);
       if (!token) return;
-      const { data, error } = await supabase.rpc("guest_get_daily_log", {
+      const { data, error: rpcErr } = await supabase.rpc("guest_get_daily_log", {
         p_token: token,
         p_log_date: today,
       });
-      if (error || !data || !Array.isArray(data) || data.length === 0) return;
+      if (rpcErr || !data || !Array.isArray(data) || data.length === 0) return;
       applyRow(data[0] as Record<string, unknown>);
     };
     function applyRow(data: Record<string, unknown>) {
@@ -115,21 +117,15 @@ export function DailyLogModal({
       setWorstFood((data.worst_food_text as string) ?? "");
       setFunniestMoment((data.funniest_moment as string) ?? "");
       setCustomAnswer((data.custom_prompt_answer as string) ?? "");
-      setLinkedItemId((data.linked_itinerary_item_id as string | null) ?? null);
       setActivityHighlight((data.activity_highlight as string) ?? "");
+      setPhotoRemoteUrls(parseCheckInPhotoUrls(data.best_food_photo_url as string | null | undefined));
     }
     void load();
   }, [tripId, memberId, today]);
 
-  // Scroll to the section matching how you opened the sheet
   useEffect(() => {
     if (initialFocus === "full") return;
-    const id =
-      initialFocus === "plan"
-        ? "dl-anchor-plan"
-        : initialFocus === "food"
-          ? "dl-anchor-food"
-          : "dl-anchor-activity";
+    const id = initialFocus === "food" ? "dl-anchor-food" : "dl-anchor-activity";
     const t = window.setTimeout(() => {
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 350);
@@ -138,7 +134,6 @@ export function DailyLogModal({
 
   const stepsNum = stepsCount ? parseInt(stepsCount, 10) : null;
 
-  // Fun step equivalents
   const stepsContext = useCallback((steps: number): string => {
     if (steps > 30000) return "You basically ran a marathon. Respect.";
     if (steps > 20000) return "That's the equivalent of crossing a city on foot.";
@@ -148,10 +143,53 @@ export function DailyLogModal({
     return "A more leisurely kind of day.";
   }, []);
 
+  const addPhotoFiles = useCallback((files: FileList | null) => {
+    if (!files?.length) return;
+    setPhotoFiles((prev) => {
+      const next = [...prev];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        if (!f?.type.startsWith("image/")) continue;
+        if (photoRemoteUrls.length + next.length >= 5) break;
+        next.push(f);
+      }
+      return next;
+    });
+  }, [photoRemoteUrls.length]);
+
+  const removePhotoAt = useCallback(
+    (index: number) => {
+      if (index < photoRemoteUrls.length) {
+        setPhotoRemoteUrls((a) => a.filter((_, j) => j !== index));
+      } else {
+        const fi = index - photoRemoteUrls.length;
+        setPhotoFiles((a) => a.filter((_, j) => j !== fi));
+      }
+    },
+    [photoRemoteUrls.length],
+  );
+
+  const buildPhotoUrlsAfterUpload = useCallback(async (): Promise<string[]> => {
+    const urls: string[] = [...photoRemoteUrls];
+    let sortIndex = photoRemoteUrls.length;
+    for (const file of photoFiles) {
+      if (urls.length >= 5) break;
+      const url = await uploadDailyCheckInPhoto(tripId, memberId, today, file, sortIndex);
+      if (url) {
+        urls.push(url);
+        sortIndex++;
+      }
+    }
+    return urls.slice(0, 5);
+  }, [tripId, memberId, today, photoRemoteUrls, photoFiles]);
+
   const handleSave = useCallback(async () => {
     setSaving(true);
     setError(null);
     try {
+      const finalPhotoUrls = await buildPhotoUrlsAfterUpload();
+      const photoSerialized = serializeCheckInPhotoUrls(finalPhotoUrls);
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -167,8 +205,9 @@ export function DailyLogModal({
             worst_food_text: worstFood.trim() || null,
             funniest_moment: funniestMoment.trim() || null,
             custom_prompt_answer: customAnswer.trim() || null,
-            linked_itinerary_item_id: linkedItemId,
+            linked_itinerary_item_id: null,
             activity_highlight: activityHighlight.trim() || null,
+            best_food_photo_url: photoSerialized,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "trip_id,member_id,log_date" },
@@ -186,8 +225,9 @@ export function DailyLogModal({
           p_worst_food_text: worstFood.trim() || null,
           p_funniest_moment: funniestMoment.trim() || null,
           p_custom_prompt_answer: customAnswer.trim() || null,
-          p_linked_itinerary_item_id: linkedItemId,
+          p_linked_itinerary_item_id: null,
           p_activity_highlight: activityHighlight.trim() || null,
+          p_best_food_photo_url: photoSerialized,
         });
         if (rpcErr) throw rpcErr;
       }
@@ -198,6 +238,7 @@ export function DailyLogModal({
       setSaving(false);
     }
   }, [
+    buildPhotoUrlsAfterUpload,
     tripId,
     memberId,
     today,
@@ -207,147 +248,56 @@ export function DailyLogModal({
     worstFood,
     funniestMoment,
     customAnswer,
-    linkedItemId,
     activityHighlight,
     onSaved,
   ]);
 
-  const handleReceiptUpload = useCallback(async (file: File) => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.user) {
-      setError("Sign in to attach receipts, or add them from a journal log.");
-      return;
-    }
-    setReceiptUploading(true);
-    try {
-      // Preview
-      setReceiptThumb(URL.createObjectURL(file));
-      // Upload to journal-photos bucket with is_receipt flag
-      // We create a minimal journal entry to hold the receipt
-      const { data: entry, error: entryErr } = await supabase
-        .from("journal_entries")
-        .insert({
-          trip_id: tripId,
-          author_id: session.user.id,
-          title: `Receipt – Day ${dayNumber}`,
-          split_between: 1,
-          currency: "USD",
-        })
-        .select("id")
-        .single();
-      if (entryErr || !entry) return;
-
-      const ext = file.name.split(".").pop() ?? "jpg";
-      const path = `${tripId}/${entry.id}/receipt.${ext}`;
-      const { error: uploadErr } = await supabase.storage
-        .from("journal-photos")
-        .upload(path, file, { contentType: file.type });
-      if (uploadErr) return;
-
-      await supabase.from("journal_photos").insert({
-        entry_id: entry.id,
-        storage_path: path,
-        sort_order: 0,
-        is_receipt: true,
-      });
-    } finally {
-      setReceiptUploading(false);
-    }
-  }, [tripId, memberId, dayNumber]);
-
   return (
     <div className="fixed inset-0 z-[80] flex flex-col">
-      {/* Backdrop */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      {/* Sheet */}
       <motion.div
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
         transition={{ type: "spring", stiffness: 380, damping: 38 }}
-        className="absolute bottom-0 left-0 right-0 max-h-[90dvh] bg-[#111] rounded-t-3xl overflow-hidden flex flex-col"
+        className="absolute bottom-0 left-0 right-0 max-h-[90dvh] bg-surface rounded-t-3xl overflow-hidden flex flex-col border-t border-border shadow-xl"
       >
-        {/* Handle + header */}
-        <div className="px-5 pt-4 pb-3 border-b border-white/5 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-4" />
+        <div className="px-5 pt-4 pb-3 border-b border-border flex-shrink-0 bg-surface-card/50">
+          <div className="w-10 h-1 rounded-full bg-border mx-auto mb-4" />
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-black text-white">
+              <h2 className="text-lg font-black text-text">
                 {initialFocus === "food"
                   ? "Food highlight"
                   : initialFocus === "activity"
                     ? "Activity moment"
-                    : initialFocus === "plan"
-                      ? "On the itinerary"
-                      : `Day ${dayNumber} check-in`}
+                    : `Day ${dayNumber} check-in`}
               </h2>
-              <p className="text-xs text-white/40 mt-0.5">
-                {initialFocus === "full"
-                  ? "Private until the group Wrapped"
-                  : "Link notes to your plan — one check-in per calendar day"}
+              <p className="text-xs text-text-muted mt-0.5">
+                One check-in per calendar day · private until the group Wrapped
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center text-white/50 hover:text-white transition-colors"
+              className="w-8 h-8 rounded-full bg-surface-muted flex items-center justify-center text-text-muted hover:text-text transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {/* Link to planned stop */}
-          <div id="dl-anchor-plan">
-            <PromptCard
-              icon={<MapPin className="w-4 h-4 text-cyan-400" />}
-              title="Connect to the plan"
-              subtitle="Optional — link this check-in to a stop on the day you’re viewing"
-            >
-              {planItemsForDay.length === 0 ? (
-                <p className="mt-3 text-xs text-white/35">
-                  No itinerary items for this day. Switch day tabs or add stops in Edit.
-                </p>
-              ) : (
-                <select
-                  value={linkedItemId ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setLinkedItemId(v || null);
-                    const item = planItemsForDay.find((i) => i.id === v);
-                    if (item?.category === "food" && !bestFood.trim()) {
-                      setBestFood(item.title);
-                    }
-                  }}
-                  className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-teal-400/50"
-                >
-                  <option value="">Not linked</option>
-                  {planItemsForDay.map((it) => (
-                    <option key={it.id} value={it.id}>
-                      {it.time ? `${it.time} · ` : ""}
-                      {it.title} ({it.category})
-                    </option>
-                  ))}
-                </select>
-              )}
-            </PromptCard>
-          </div>
-
-          {/* Activity */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-surface">
           <div id="dl-anchor-activity">
             <PromptCard
-              icon={<Compass className="w-4 h-4 text-sky-400" />}
+              icon={<Compass className="w-4 h-4 text-sky-600" />}
               title="Activity highlight"
               subtitle="Museum, hike, show — what stood out?"
             >
@@ -356,13 +306,12 @@ export function DailyLogModal({
                 onChange={(e) => setActivityHighlight(e.target.value.slice(0, 500))}
                 placeholder="We accidentally joined a parade…"
                 rows={3}
-                className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
+                className="mt-3 w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
               />
-              <p className="text-right text-[11px] text-white/25 mt-1">{activityHighlight.length}/500</p>
+              <p className="text-right text-[11px] text-text-muted mt-1">{activityHighlight.length}/500</p>
             </PromptCard>
           </div>
 
-          {/* Mood */}
           <PromptCard icon={<span className="text-xl">🎭</span>} title="Mood" subtitle="How was today?">
             <div className="flex gap-2 mt-3">
               {MOODS.map(({ score, emoji, label }) => (
@@ -373,25 +322,21 @@ export function DailyLogModal({
                   className={cn(
                     "flex-1 flex flex-col items-center gap-1 py-2.5 rounded-2xl border transition-all",
                     moodScore === score
-                      ? "border-teal-400/60 bg-teal-500/10"
-                      : "border-white/8 bg-white/[0.03] hover:bg-white/[0.06]",
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-surface-card hover:bg-surface-muted/80",
                   )}
                 >
-                  <span className={cn(
-                    "text-2xl transition-transform",
-                    moodScore === score ? "scale-110" : "",
-                  )}>
+                  <span className={cn("text-2xl transition-transform", moodScore === score ? "scale-110" : "")}>
                     {emoji}
                   </span>
-                  <span className="text-[10px] text-white/40">{label}</span>
+                  <span className="text-[10px] text-text-muted">{label}</span>
                 </button>
               ))}
             </div>
           </PromptCard>
 
-          {/* Steps */}
           <PromptCard
-            icon={<Footprints className="w-4 h-4 text-teal-400" />}
+            icon={<Footprints className="w-4 h-4 text-teal-600" />}
             title="Steps today"
             subtitle="Manual entry or sync from Health"
           >
@@ -400,35 +345,84 @@ export function DailyLogModal({
               value={stepsCount}
               onChange={(e) => setStepsCount(e.target.value)}
               placeholder="e.g. 12,400"
-              className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors"
+              className="mt-3 w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors"
             />
             {stepsNum && stepsNum > 0 && (
-              <p className="mt-2 text-xs text-teal-400/80">
-                {stepsNum.toLocaleString()} steps · {stepsContext(stepsNum)}
-              </p>
+              <p className="mt-2 text-xs text-primary/90">{stepsNum.toLocaleString()} steps · {stepsContext(stepsNum)}</p>
             )}
           </PromptCard>
 
-          {/* Best food */}
+          <PromptCard
+            icon={<span className="text-sm font-semibold text-text-muted">📷</span>}
+            title="Check-in photos"
+            subtitle="Up to 5 images from today"
+          >
+            <div className="mt-3 flex flex-wrap gap-2">
+              {photoRemoteUrls.map((url, i) => (
+                <div key={`r-${url}-${i}`} className="relative h-20 w-20 rounded-xl overflow-hidden border border-border bg-surface-card">
+                  <img src={url} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    aria-label="Remove photo"
+                    onClick={() => removePhotoAt(i)}
+                    className="absolute top-1 right-1 h-6 w-6 rounded-full bg-black/50 text-white text-xs flex items-center justify-center"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {photoFiles.map((file, i) => {
+                const idx = photoRemoteUrls.length + i;
+                return (
+                  <LocalPhotoThumb
+                    key={`l-${file.name}-${file.size}-${i}`}
+                    file={file}
+                    onRemove={() => removePhotoAt(idx)}
+                  />
+                );
+              })}
+              {totalPhotoCount < 5 && (
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="h-20 w-20 rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 flex flex-col items-center justify-center gap-0.5 text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <Plus className="w-7 h-7" />
+                  <span className="text-[10px] font-medium">Add</span>
+                </button>
+              )}
+            </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addPhotoFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </PromptCard>
+
           <div id="dl-anchor-food">
             <PromptCard
-              icon={<Star className="w-4 h-4 text-amber-400" />}
+              icon={<Star className="w-4 h-4 text-amber-600" />}
               title="Best food today"
               subtitle="The bite you'll still be talking about"
             >
-            <textarea
-              value={bestFood}
-              onChange={(e) => setBestFood(e.target.value)}
-              placeholder="Din Tai Fung — the soup dumplings changed me"
-              rows={2}
-              className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
-            />
+              <textarea
+                value={bestFood}
+                onChange={(e) => setBestFood(e.target.value)}
+                placeholder="Din Tai Fung — the soup dumplings changed me"
+                rows={2}
+                className="mt-3 w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
+              />
             </PromptCard>
           </div>
 
-          {/* Worst food */}
           <PromptCard
-            icon={<Skull className="w-4 h-4 text-rose-400" />}
+            icon={<Skull className="w-4 h-4 text-rose-500" />}
             title="Worst food today"
             subtitle="The one you regret (or won't admit to)"
           >
@@ -437,17 +431,16 @@ export function DailyLogModal({
               onChange={(e) => setWorstFood(e.target.value)}
               placeholder="Gas station hot dog. Not my finest hour."
               rows={2}
-              className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
+              className="mt-3 w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
             />
           </PromptCard>
 
-          {/* Funniest moment */}
           <PromptCard
-            icon={<Laugh className="w-4 h-4 text-purple-400" />}
+            icon={<Laugh className="w-4 h-4 text-violet-600" />}
             title="Funniest moment"
             subtitle={
               <span>
-                Private · <span className="text-purple-400/80">revealed in group Wrapped</span>
+                Private · <span className="text-violet-700/90">revealed in group Wrapped</span>
               </span>
             }
           >
@@ -456,12 +449,11 @@ export function DailyLogModal({
               onChange={(e) => setFunniestMoment(e.target.value.slice(0, 280))}
               placeholder="Kai tried to pay for parking with Tim Hortons rewards"
               rows={3}
-              className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
+              className="mt-3 w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
             />
-            <p className="text-right text-[11px] text-white/25 mt-1">{funniestMoment.length}/280</p>
+            <p className="text-right text-[11px] text-text-muted mt-1">{funniestMoment.length}/280</p>
           </PromptCard>
 
-          {/* Custom prompt */}
           {customPrompt && (
             <PromptCard
               icon={<span className="text-base">✨</span>}
@@ -473,55 +465,19 @@ export function DailyLogModal({
                 onChange={(e) => setCustomAnswer(e.target.value)}
                 placeholder="Your answer…"
                 rows={2}
-                className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
+                className="mt-3 w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
               />
             </PromptCard>
           )}
-
-          {/* Receipt upload */}
-          <PromptCard
-            icon={<Camera className="w-4 h-4 text-white/40" />}
-            title="Receipt"
-            subtitle="Optional — photograph a receipt to track spend"
-          >
-            <div className="mt-3 flex items-center gap-3">
-              {receiptThumb && (
-                <img src={receiptThumb} alt="Receipt" className="w-14 h-14 rounded-xl object-cover border border-white/10" />
-              )}
-              <button
-                type="button"
-                onClick={() => receiptRef.current?.click()}
-                disabled={receiptUploading}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-xs text-white/50 hover:bg-white/[0.05] transition-colors disabled:opacity-50"
-              >
-                <Camera className="w-3.5 h-3.5" />
-                {receiptUploading ? "Uploading…" : receiptThumb ? "Replace" : "Add receipt"}
-              </button>
-            </div>
-            <input
-              ref={receiptRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleReceiptUpload(f);
-              }}
-            />
-          </PromptCard>
-
         </div>
 
-        {/* Footer */}
-        <div className="px-5 pb-8 pt-3 flex-shrink-0 border-t border-white/5">
-          {error && (
-            <p className="text-sm text-red-400 mb-3 text-center">{error}</p>
-          )}
+        <div className="px-5 pb-8 pt-3 flex-shrink-0 border-t border-border bg-surface-card/80">
+          {error && <p className="text-sm text-red-600 mb-3 text-center">{error}</p>}
           <motion.button
             type="button"
             onClick={() => void handleSave()}
             disabled={saving}
-            className="w-full py-4 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60"
+            className="w-full py-4 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60 shadow-md"
             style={{ background: `linear-gradient(135deg, ${TEAL}, #0891b2)` }}
             whileTap={saving ? {} : { scale: 0.98 }}
           >
@@ -541,7 +497,34 @@ export function DailyLogModal({
   );
 }
 
-// ── Card wrapper ─────────────────────────────────────────────────────────────
+function LocalPhotoThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+
+  if (!url) {
+    return (
+      <div className="h-20 w-20 rounded-xl border border-border bg-surface-muted animate-pulse" />
+    );
+  }
+
+  return (
+    <div className="relative h-20 w-20 rounded-xl overflow-hidden border border-border bg-surface-card">
+      <img src={url} alt="" className="h-full w-full object-cover" />
+      <button
+        type="button"
+        aria-label="Remove photo"
+        onClick={onRemove}
+        className="absolute top-1 right-1 h-6 w-6 rounded-full bg-black/50 text-white text-xs flex items-center justify-center"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
 
 function PromptCard({
   icon,
@@ -555,16 +538,14 @@ function PromptCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-4">
+    <div className="rounded-2xl border border-border bg-surface-card px-4 py-4 shadow-sm">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 w-7 h-7 rounded-xl bg-white/[0.06] flex items-center justify-center shrink-0">
+        <div className="mt-0.5 w-7 h-7 rounded-xl bg-surface-muted flex items-center justify-center shrink-0 border border-border">
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-white leading-snug">{title}</p>
-          {subtitle && (
-            <p className="text-xs text-white/35 mt-0.5 leading-snug">{subtitle}</p>
-          )}
+          <p className="text-sm font-semibold text-text leading-snug">{title}</p>
+          {subtitle && <p className="text-xs text-text-muted mt-0.5 leading-snug">{subtitle}</p>}
         </div>
       </div>
       {children}

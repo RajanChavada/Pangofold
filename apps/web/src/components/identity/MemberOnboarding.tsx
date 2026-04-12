@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Camera, Upload, Check, ArrowLeft, ArrowRight } from "lucide-react";
+import { Camera, Check, ArrowLeft, ArrowRight, Plus } from "lucide-react";
 import type { OnboardingPrompts, TripMember } from "@pangofold/shared";
 import { insertGuestMember, saveToken, uploadMemberAvatar, upsertOwnerMember } from "../../hooks/useMemberIdentity";
 import { supabase } from "../../lib/supabase";
@@ -133,13 +133,13 @@ export function MemberOnboarding({
   };
 
   return (
-    <div className="fixed inset-0 z-[75] flex flex-col bg-[#0d0d0d]">
+    <div className="fixed inset-0 z-[75] flex flex-col bg-surface text-text">
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 pt-5 pb-2">
         <button
           type="button"
           onClick={goPrev}
-          className="p-2 rounded-xl text-white/40 hover:text-white hover:bg-white/[0.06] transition-colors"
+          className="p-2 rounded-xl text-text-muted hover:text-text hover:bg-surface-muted transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
@@ -151,7 +151,7 @@ export function MemberOnboarding({
               key={s}
               animate={{
                 width: s === step ? 20 : 6,
-                backgroundColor: s === step ? TEAL : s < step ? "#0891b2" : "rgba(255,255,255,0.15)",
+                backgroundColor: s === step ? TEAL : s < step ? "#0891b2" : "rgba(15,23,42,0.15)",
               }}
               className="h-1.5 rounded-full"
               transition={{ type: "spring", stiffness: 400, damping: 30 }}
@@ -211,7 +211,7 @@ export function MemberOnboarding({
             onClick={goNext}
             disabled={step === 2 && !canAdvanceStep2}
             className={cn(
-              "w-full py-4 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 transition-opacity",
+              "w-full py-4 rounded-2xl font-semibold text-sm text-white flex items-center justify-center gap-2 transition-opacity shadow-md",
               step === 2 && !canAdvanceStep2 ? "opacity-40" : "opacity-100",
             )}
             style={{ background: `linear-gradient(135deg, ${TEAL}, #0891b2)` }}
@@ -267,61 +267,48 @@ function Step1({
   onUpload: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-6 w-full">
+    <div className="flex flex-col items-center gap-6 w-full max-w-sm mx-auto">
       <div className="text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-teal-400 mb-3">
-          Step 1 of 3
-        </p>
-        <h2 className="text-3xl font-black text-white mb-2">Your photo</h2>
-        <p className="text-sm text-white/40">
-          This appears in the crew carousel and your personal Wrapped.
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary mb-3">Step 1 of 3</p>
+        <h2 className="text-3xl font-black text-text mb-2">Your photo</h2>
+        <p className="text-sm text-text-muted">This appears in the crew carousel and your personal Wrapped.</p>
       </div>
 
-      {/* Avatar preview */}
-      <div className="relative">
-        <div
-          className="w-32 h-32 rounded-full overflow-hidden border-2 flex items-center justify-center"
-          style={{ borderColor: preview ? TEAL : "rgba(255,255,255,0.1)" }}
-        >
-          {preview ? (
-            <img src={preview} alt="Your avatar" className="w-full h-full object-cover" />
-          ) : (
-            <div className="flex flex-col items-center gap-2 text-white/20">
-              <Camera className="w-8 h-8" />
-              <span className="text-xs">No photo</span>
+      <button
+        type="button"
+        onClick={onUpload}
+        className="relative w-full flex flex-col items-center justify-center gap-3 py-8 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 transition-colors"
+      >
+        <div className="relative">
+          <div
+            className="w-28 h-28 rounded-full overflow-hidden border-2 flex items-center justify-center bg-surface-card"
+            style={{ borderColor: preview ? TEAL : undefined }}
+          >
+            {preview ? (
+              <img src={preview} alt="Your avatar" className="w-full h-full object-cover" />
+            ) : (
+              <div className="flex flex-col items-center gap-2 text-text-muted">
+                <div className="w-14 h-14 rounded-full border-2 border-dashed border-primary/50 flex items-center justify-center bg-surface-card">
+                  <Plus className="w-7 h-7 text-primary" />
+                </div>
+                <span className="text-xs">Add photo</span>
+              </div>
+            )}
+          </div>
+          {preview && (
+            <div
+              className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center shadow-md"
+              style={{ background: TEAL }}
+            >
+              <Check className="w-4 h-4 text-white" />
             </div>
           )}
         </div>
-        {preview && (
-          <div
-            className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center"
-            style={{ background: TEAL }}
-          >
-            <Check className="w-4 h-4 text-white" />
-          </div>
-        )}
-      </div>
-
-      {/* Upload buttons */}
-      <div className="flex gap-3 w-full">
-        <button
-          type="button"
-          onClick={onUpload}
-          className="flex-1 flex flex-col items-center gap-2 py-4 rounded-2xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] transition-colors"
-        >
-          <Camera className="w-5 h-5 text-teal-400" />
-          <span className="text-xs text-white/60">Take photo</span>
-        </button>
-        <button
-          type="button"
-          onClick={onUpload}
-          className="flex-1 flex flex-col items-center gap-2 py-4 rounded-2xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] transition-colors"
-        >
-          <Upload className="w-5 h-5 text-teal-400" />
-          <span className="text-xs text-white/60">Upload from library</span>
-        </button>
-      </div>
+        <span className="text-xs font-medium text-text-muted flex items-center gap-1.5">
+          <Camera className="w-3.5 h-3.5 text-primary" />
+          Tap to take or choose from library
+        </span>
+      </button>
     </div>
   );
 }
@@ -342,18 +329,16 @@ function Step2({
   setAnswer: (v: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div className="flex flex-col gap-6 w-full max-w-sm mx-auto">
       <div className="text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-teal-400 mb-3">
-          Step 2 of 3
-        </p>
-        <h2 className="text-3xl font-black text-white mb-2">About you</h2>
-        <p className="text-sm text-white/40">Shown in the crew carousel and group Wrapped.</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary mb-3">Step 2 of 3</p>
+        <h2 className="text-3xl font-black text-text mb-2">About you</h2>
+        <p className="text-sm text-text-muted">Shown in the crew carousel and group Wrapped.</p>
       </div>
 
       <div className="flex flex-col gap-4">
         <div>
-          <label className="text-xs font-medium text-white/50 uppercase tracking-wide mb-2 block">
+          <label className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2 block">
             Your name
           </label>
           <input
@@ -362,22 +347,20 @@ function Step2({
             onChange={(e) => setDisplayName(e.target.value)}
             maxLength={60}
             placeholder="First name or nickname"
-            className="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/60 transition-colors"
+            className="w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors"
           />
         </div>
 
         <div>
-          <label className="text-xs font-medium text-white/50 uppercase tracking-wide mb-2 block">
-            {prompt}
-          </label>
+          <label className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2 block">{prompt}</label>
           <textarea
             value={answer}
             onChange={(e) => setAnswer(e.target.value.slice(0, 140))}
             placeholder="Your answer…"
             rows={3}
-            className="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/60 transition-colors resize-none"
+            className="w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
           />
-          <p className="text-right text-[11px] text-white/25 mt-1">{answer.length}/140</p>
+          <p className="text-right text-[11px] text-text-muted mt-1">{answer.length}/140</p>
         </div>
       </div>
     </div>
@@ -400,41 +383,29 @@ function Step3({
   saving: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div className="flex flex-col gap-6 w-full max-w-sm mx-auto">
       <div className="text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-teal-400 mb-3">
-          Step 3 of 3
-        </p>
-        <h2 className="text-3xl font-black text-white mb-2">Fun fact</h2>
-        <p className="text-sm text-white/40">
-          Optional — this gets revealed in the group Wrapped at the end.
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary mb-3">Step 3 of 3</p>
+        <h2 className="text-3xl font-black text-text mb-2">Fun fact</h2>
+        <p className="text-sm text-text-muted">Optional — this gets revealed in the group Wrapped at the end.</p>
       </div>
 
       <div>
-        <label className="text-xs font-medium text-white/50 uppercase tracking-wide mb-2 block">
-          {prompt}
-        </label>
+        <label className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2 block">{prompt}</label>
         <textarea
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value.slice(0, 140))}
           placeholder="Your answer…"
           rows={4}
-          className="w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/60 transition-colors resize-none"
+          className="w-full bg-surface-card border border-border rounded-xl px-4 py-3 text-text placeholder:text-text-muted/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/25 transition-colors resize-none"
         />
-        <p className="text-right text-[11px] text-white/25 mt-1">{value.length}/140</p>
+        <p className="text-right text-[11px] text-text-muted mt-1">{value.length}/140</p>
       </div>
 
-      {error && (
-        <p className="text-sm text-red-400 text-center">{error}</p>
-      )}
+      {error && <p className="text-sm text-red-600 text-center">{error}</p>}
 
-      {saving && (
-        <p className="text-sm text-teal-400 text-center animate-pulse">
-          Creating your profile…
-        </p>
-      )}
+      {saving && <p className="text-sm text-primary text-center animate-pulse">Creating your profile…</p>}
     </div>
   );
 }

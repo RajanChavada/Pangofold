@@ -9,6 +9,7 @@ import type {
   Place,
 } from "@pangofold/shared";
 import { supabase } from "../lib/supabase";
+import { getSavedToken } from "./useMemberIdentity";
 
 interface UseTripResult {
   trip: Trip | null;
@@ -193,10 +194,34 @@ export function useTrip(tripId: string | undefined): UseTripResult {
   const refetchQuiet = useCallback(() => fetchTrip({ silent: true }), [fetchTrip]);
 
   const toggleItemChecked = useCallback(async (itemId: string, checked: boolean) => {
-    await supabase
-      .from("itinerary_items")
-      .update({ is_checked: checked })
-      .eq("id", itemId);
+    if (!tripId) return;
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session?.user) {
+      const { error } = await supabase.from("itinerary_items").update({ is_checked: checked }).eq("id", itemId);
+      if (error) {
+        console.error("checklist update failed", error);
+        return;
+      }
+    } else {
+      const token = getSavedToken(tripId);
+      if (!token) {
+        console.warn("checklist: no guest token for this trip");
+        return;
+      }
+      const { error } = await supabase.rpc("guest_toggle_itinerary_item_checked", {
+        p_token: token,
+        p_item_id: itemId,
+        p_checked: checked,
+      });
+      if (error) {
+        console.error("guest checklist toggle failed", error);
+        return;
+      }
+    }
 
     setTrip((prev) => {
       if (!prev) return prev;
@@ -213,7 +238,7 @@ export function useTrip(tripId: string | undefined): UseTripResult {
         })),
       };
     });
-  }, []);
+  }, [tripId]);
 
   const updateTripMeta = useCallback(
     async (patch: {
