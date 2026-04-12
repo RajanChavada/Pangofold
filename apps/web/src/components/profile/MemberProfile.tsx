@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   X,
@@ -151,16 +152,24 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
     setSavingBlurb(false);
   }, [member.id, blurbDraft]);
 
-  return (
+  // Avoid instant close: the same pointer/touch that opened the sheet can hit the new backdrop.
+  const [backdropDismissEnabled, setBackdropDismissEnabled] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setBackdropDismissEnabled(true), 250);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const tree = (
     <>
-      <div className="fixed inset-0 z-[80] flex flex-col">
+      <div className="fixed inset-0 z-[100] flex flex-col">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-          onClick={onClose}
+          onClick={() => backdropDismissEnabled && onClose()}
+          aria-hidden
         />
 
         {/* Sheet */}
@@ -170,6 +179,8 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
           exit={{ y: "100%" }}
           transition={{ type: "spring", stiffness: 360, damping: 36 }}
           className="absolute bottom-0 left-0 right-0 max-h-[94dvh] bg-[#0f0f0f] rounded-t-3xl overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="relative flex-shrink-0">
@@ -423,7 +434,7 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[110] bg-black/90 flex items-center justify-center p-4"
             onClick={() => setLightboxUrl(null)}
           >
             <motion.img
@@ -439,6 +450,9 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
       </AnimatePresence>
     </>
   );
+
+  if (typeof document === "undefined") return null;
+  return createPortal(tree, document.body);
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────

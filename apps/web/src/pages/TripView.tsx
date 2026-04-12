@@ -638,8 +638,8 @@ export function TripView() {
       <div className="max-w-lg mx-auto">
         {/* Profile badge top-right */}
         {currentMember && (
-          <div className="relative">
-            <div className="absolute top-4 right-4 z-40">
+          <div className="relative z-[60] isolate">
+            <div className="absolute top-4 right-4">
               <MemberAvatarBadge
                 member={currentMember}
                 size={36}
@@ -652,7 +652,7 @@ export function TripView() {
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.92, y: -8 }}
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                    className="absolute right-0 top-10 w-52 rounded-2xl bg-[#1a1a1a] border border-white/10 shadow-2xl overflow-hidden z-50"
+                    className="absolute right-0 top-10 w-52 rounded-2xl bg-[#1a1a1a] border border-white/10 shadow-2xl overflow-hidden z-10"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="px-4 py-3 border-b border-white/5">
