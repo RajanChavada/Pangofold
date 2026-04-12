@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { X, Footprints, Star, Skull, Laugh, Camera } from "lucide-react";
+import { X, Footprints, Star, Skull, Laugh, Camera, MapPin, Compass } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/cn";
 import { getSavedToken } from "../hooks/useMemberIdentity";
@@ -15,11 +15,22 @@ const MOODS = [
   { score: 5, emoji: "🤩", label: "Best day" },
 ];
 
+export type DailyLogFocus = "full" | "food" | "activity" | "plan";
+
+export interface PlanItemOption {
+  id: string;
+  title: string;
+  time?: string;
+  category: string;
+}
+
 interface DailyLogModalProps {
   tripId: string;
   memberId: string;
   dayNumber: number;
   customPrompt?: string;
+  planItemsForDay?: PlanItemOption[];
+  initialFocus?: DailyLogFocus;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -29,6 +40,8 @@ export function DailyLogModal({
   memberId,
   dayNumber,
   customPrompt,
+  planItemsForDay = [],
+  initialFocus = "full",
   onClose,
   onSaved,
 }: DailyLogModalProps) {
@@ -40,6 +53,8 @@ export function DailyLogModal({
   const [worstFood, setWorstFood] = useState("");
   const [funniestMoment, setFunniestMoment] = useState("");
   const [customAnswer, setCustomAnswer] = useState("");
+  const [linkedItemId, setLinkedItemId] = useState<string | null>(null);
+  const [activityHighlight, setActivityHighlight] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,9 +97,26 @@ export function DailyLogModal({
       setWorstFood((data.worst_food_text as string) ?? "");
       setFunniestMoment((data.funniest_moment as string) ?? "");
       setCustomAnswer((data.custom_prompt_answer as string) ?? "");
+      setLinkedItemId((data.linked_itinerary_item_id as string | null) ?? null);
+      setActivityHighlight((data.activity_highlight as string) ?? "");
     }
     void load();
   }, [tripId, memberId, today]);
+
+  // Scroll to the section matching how you opened the sheet
+  useEffect(() => {
+    if (initialFocus === "full") return;
+    const id =
+      initialFocus === "plan"
+        ? "dl-anchor-plan"
+        : initialFocus === "food"
+          ? "dl-anchor-food"
+          : "dl-anchor-activity";
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [initialFocus]);
 
   const stepsNum = stepsCount ? parseInt(stepsCount, 10) : null;
 
@@ -117,6 +149,8 @@ export function DailyLogModal({
             worst_food_text: worstFood.trim() || null,
             funniest_moment: funniestMoment.trim() || null,
             custom_prompt_answer: customAnswer.trim() || null,
+            linked_itinerary_item_id: linkedItemId,
+            activity_highlight: activityHighlight.trim() || null,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "trip_id,member_id,log_date" },
@@ -134,6 +168,8 @@ export function DailyLogModal({
           p_worst_food_text: worstFood.trim() || null,
           p_funniest_moment: funniestMoment.trim() || null,
           p_custom_prompt_answer: customAnswer.trim() || null,
+          p_linked_itinerary_item_id: linkedItemId,
+          p_activity_highlight: activityHighlight.trim() || null,
         });
         if (rpcErr) throw rpcErr;
       }
@@ -143,7 +179,20 @@ export function DailyLogModal({
     } finally {
       setSaving(false);
     }
-  }, [tripId, memberId, today, stepsNum, moodScore, bestFood, worstFood, funniestMoment, customAnswer, onSaved]);
+  }, [
+    tripId,
+    memberId,
+    today,
+    stepsNum,
+    moodScore,
+    bestFood,
+    worstFood,
+    funniestMoment,
+    customAnswer,
+    linkedItemId,
+    activityHighlight,
+    onSaved,
+  ]);
 
   const handleReceiptUpload = useCallback(async (file: File) => {
     const {
@@ -214,8 +263,20 @@ export function DailyLogModal({
           <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-4" />
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-black text-white">Day {dayNumber} check-in</h2>
-              <p className="text-xs text-white/40 mt-0.5">Private until the group Wrapped</p>
+              <h2 className="text-lg font-black text-white">
+                {initialFocus === "food"
+                  ? "Food highlight"
+                  : initialFocus === "activity"
+                    ? "Activity moment"
+                    : initialFocus === "plan"
+                      ? "On the itinerary"
+                      : `Day ${dayNumber} check-in`}
+              </h2>
+              <p className="text-xs text-white/40 mt-0.5">
+                {initialFocus === "full"
+                  ? "Private until the group Wrapped"
+                  : "Link notes to your plan — one check-in per calendar day"}
+              </p>
             </div>
             <button
               type="button"
@@ -229,6 +290,59 @@ export function DailyLogModal({
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {/* Link to planned stop */}
+          <div id="dl-anchor-plan">
+            <PromptCard
+              icon={<MapPin className="w-4 h-4 text-cyan-400" />}
+              title="Connect to the plan"
+              subtitle="Optional — link this check-in to a stop on the day you’re viewing"
+            >
+              {planItemsForDay.length === 0 ? (
+                <p className="mt-3 text-xs text-white/35">
+                  No itinerary items for this day. Switch day tabs or add stops in Edit.
+                </p>
+              ) : (
+                <select
+                  value={linkedItemId ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setLinkedItemId(v || null);
+                    const item = planItemsForDay.find((i) => i.id === v);
+                    if (item?.category === "food" && !bestFood.trim()) {
+                      setBestFood(item.title);
+                    }
+                  }}
+                  className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-teal-400/50"
+                >
+                  <option value="">Not linked</option>
+                  {planItemsForDay.map((it) => (
+                    <option key={it.id} value={it.id}>
+                      {it.time ? `${it.time} · ` : ""}
+                      {it.title} ({it.category})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </PromptCard>
+          </div>
+
+          {/* Activity */}
+          <div id="dl-anchor-activity">
+            <PromptCard
+              icon={<Compass className="w-4 h-4 text-sky-400" />}
+              title="Activity highlight"
+              subtitle="Museum, hike, show — what stood out?"
+            >
+              <textarea
+                value={activityHighlight}
+                onChange={(e) => setActivityHighlight(e.target.value.slice(0, 500))}
+                placeholder="We accidentally joined a parade…"
+                rows={3}
+                className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
+              />
+              <p className="text-right text-[11px] text-white/25 mt-1">{activityHighlight.length}/500</p>
+            </PromptCard>
+          </div>
 
           {/* Mood */}
           <PromptCard icon={<span className="text-xl">🎭</span>} title="Mood" subtitle="How was today?">
@@ -278,11 +392,12 @@ export function DailyLogModal({
           </PromptCard>
 
           {/* Best food */}
-          <PromptCard
-            icon={<Star className="w-4 h-4 text-amber-400" />}
-            title="Best food today"
-            subtitle="The bite you'll still be talking about"
-          >
+          <div id="dl-anchor-food">
+            <PromptCard
+              icon={<Star className="w-4 h-4 text-amber-400" />}
+              title="Best food today"
+              subtitle="The bite you'll still be talking about"
+            >
             <textarea
               value={bestFood}
               onChange={(e) => setBestFood(e.target.value)}
@@ -290,7 +405,8 @@ export function DailyLogModal({
               rows={2}
               className="mt-3 w-full bg-white/[0.06] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/20 text-sm focus:outline-none focus:border-teal-400/50 transition-colors resize-none"
             />
-          </PromptCard>
+            </PromptCard>
+          </div>
 
           {/* Worst food */}
           <PromptCard

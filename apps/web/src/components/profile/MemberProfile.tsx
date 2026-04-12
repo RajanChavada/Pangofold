@@ -50,6 +50,7 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
   const [currentBlurb, setCurrentBlurb] = useState(member.bioBurb ?? "");
 
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
+  const [planItemTitles, setPlanItemTitles] = useState<Record<string, string>>({});
   const [receipts, setReceipts] = useState<ReceiptPhoto[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [showWrapped, setShowWrapped] = useState(false);
@@ -65,22 +66,39 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
       .eq("member_id", member.id)
       .order("log_date", { ascending: true })
       .then(({ data }) => {
-        setDailyLogs(
-          (data ?? []).map((r) => ({
-            id: r.id,
-            tripId: r.trip_id,
-            memberId: r.member_id,
-            logDate: r.log_date,
-            stepsCount: r.steps_count ?? null,
-            moodScore: r.mood_score ?? null,
-            bestFoodText: r.best_food_text ?? null,
-            worstFoodText: r.worst_food_text ?? null,
-            funniestMoment: r.funniest_moment ?? null,
-            customPromptAnswer: r.custom_prompt_answer ?? null,
-            createdAt: r.created_at,
-            updatedAt: r.updated_at,
-          })),
-        );
+        const mapped = (data ?? []).map((r) => ({
+          id: r.id,
+          tripId: r.trip_id,
+          memberId: r.member_id,
+          logDate: r.log_date,
+          stepsCount: r.steps_count ?? null,
+          moodScore: r.mood_score ?? null,
+          bestFoodText: r.best_food_text ?? null,
+          worstFoodText: r.worst_food_text ?? null,
+          funniestMoment: r.funniest_moment ?? null,
+          customPromptAnswer: r.custom_prompt_answer ?? null,
+          linkedItineraryItemId: (r as { linked_itinerary_item_id?: string }).linked_itinerary_item_id ?? null,
+          activityHighlight: (r as { activity_highlight?: string }).activity_highlight ?? null,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }));
+        setDailyLogs(mapped);
+        const linkIds = [...new Set(mapped.map((l) => l.linkedItineraryItemId).filter(Boolean))] as string[];
+        if (linkIds.length > 0) {
+          void supabase
+            .from("itinerary_items")
+            .select("id, title")
+            .in("id", linkIds)
+            .then(({ data: rows }) => {
+              const next: Record<string, string> = {};
+              for (const row of rows ?? []) {
+                next[row.id] = row.title;
+              }
+              setPlanItemTitles(next);
+            });
+        } else {
+          setPlanItemTitles({});
+        }
         setLoadingLogs(false);
       });
   }, [tripId, member.id]);
@@ -374,7 +392,16 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
               <Section title="Daily log" icon="📓">
                 <div className="space-y-3">
                   {dailyLogs.map((log, i) => (
-                    <DailyLogEntry key={log.id} log={log} dayIndex={i} />
+                    <DailyLogEntry
+                      key={log.id}
+                      log={log}
+                      dayIndex={i}
+                      linkedPlanTitle={
+                        log.linkedItineraryItemId
+                          ? planItemTitles[log.linkedItineraryItemId]
+                          : undefined
+                      }
+                    />
                   ))}
                 </div>
               </Section>
@@ -524,14 +551,25 @@ function Section({
   );
 }
 
-function DailyLogEntry({ log, dayIndex }: { log: DailyLog; dayIndex: number }) {
+function DailyLogEntry({
+  log,
+  dayIndex,
+  linkedPlanTitle,
+}: {
+  log: DailyLog;
+  dayIndex: number;
+  linkedPlanTitle?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const hasContent =
     log.stepsCount ||
     log.moodScore ||
     log.bestFoodText ||
     log.worstFoodText ||
-    log.funniestMoment;
+    log.funniestMoment ||
+    log.customPromptAnswer ||
+    log.activityHighlight ||
+    log.linkedItineraryItemId;
 
   const dateLabel = new Date(log.logDate + "T00:00:00").toLocaleDateString("en-US", {
     weekday: "short",
@@ -576,6 +614,16 @@ function DailyLogEntry({ log, dayIndex }: { log: DailyLog; dayIndex: number }) {
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 space-y-2 border-t border-white/5 pt-3">
+              {(log.linkedItineraryItemId || linkedPlanTitle) && (
+                <LogLine
+                  emoji="📍"
+                  label="On the plan"
+                  text={linkedPlanTitle ?? "Linked stop"}
+                />
+              )}
+              {log.activityHighlight && (
+                <LogLine emoji="🧭" label="Activity" text={log.activityHighlight} />
+              )}
               {log.bestFoodText && (
                 <LogLine emoji="⭐" label="Best food" text={log.bestFoodText} />
               )}

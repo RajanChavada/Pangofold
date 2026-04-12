@@ -180,6 +180,9 @@ export interface DailyLog {
   worstFoodText?: string | null;
   funniestMoment?: string | null;
   customPromptAnswer?: string | null;
+  /** Optional link to a planned stop on the itinerary */
+  linkedItineraryItemId?: string | null;
+  activityHighlight?: string | null;
   createdAt: string;
   updatedAt: string;
 }

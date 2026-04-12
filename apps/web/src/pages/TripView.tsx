@@ -32,7 +32,8 @@ import { JournalModal } from "../components/JournalModal";
 import { TripMapPanel, collectDestinationMapPoints } from "../components/TripMapPanel";
 import { WhoAreYou, MemberAvatarBadge } from "../components/identity/WhoAreYou";
 import { MemberOnboarding } from "../components/identity/MemberOnboarding";
-import { DailyLogModal } from "../components/DailyLogModal";
+import { DailyLogModal, type DailyLogFocus } from "../components/DailyLogModal";
+import { TripLogActionsSheet, type TripLogAction } from "../components/TripLogActionsSheet";
 import { MemberProfile } from "../components/profile/MemberProfile";
 import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
@@ -115,6 +116,8 @@ export function TripView() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [dailyLogOpen, setDailyLogOpen] = useState(false);
+  const [dailyLogFocus, setDailyLogFocus] = useState<DailyLogFocus>("full");
+  const [logActionsOpen, setLogActionsOpen] = useState(false);
   const [todayLogExists, setTodayLogExists] = useState(false);
   // Owner profile prompt
   const [ownerMissingProfile, setOwnerMissingProfile] = useState(false);
@@ -296,6 +299,35 @@ export function TripView() {
     setJournalDefaultTitle(defaultTitle);
     setJournalOpen(true);
   }, []);
+
+  const handleTripLogAction = useCallback(
+    (action: TripLogAction) => {
+      switch (action) {
+        case "journal":
+          openLog(null, "New memory");
+          break;
+        case "checkin_full":
+          setDailyLogFocus("full");
+          setDailyLogOpen(true);
+          break;
+        case "checkin_food":
+          setDailyLogFocus("food");
+          setDailyLogOpen(true);
+          break;
+        case "checkin_activity":
+          setDailyLogFocus("activity");
+          setDailyLogOpen(true);
+          break;
+        case "checkin_plan":
+          setDailyLogFocus("plan");
+          setDailyLogOpen(true);
+          break;
+        default:
+          break;
+      }
+    },
+    [openLog],
+  );
 
   const rosterNames = useMemo(() => {
     const s = new Set<string>();
@@ -486,12 +518,17 @@ export function TripView() {
       isMember ||
       (isCollab && gate === "ok"));
   const showTripSpendStrip = canSeeTripSpendTotals;
-  const showJournalFab =
-    !useMock && !isCollab && dbPhase === "active" && canJournal && !readOnlyTrip;
 
   // Day number for daily log (1-based from trip start or day tab index)
   const currentDayNumber = dayIndex + 1;
   const currentMemberId = currentMember?.id ?? null;
+
+  const showTripLogFab =
+    !useMock &&
+    Boolean(currentMemberId) &&
+    (dbPhase === "active" || isCollab) &&
+    canJournal &&
+    (!isCollab || gate === "ok");
 
   return (
     <div className="min-h-dvh bg-surface pb-8">
@@ -548,13 +585,32 @@ export function TripView() {
           memberId={currentMemberId}
           dayNumber={currentDayNumber}
           customPrompt={dbTrip?.dailyLogPrompt ?? undefined}
-          onClose={() => setDailyLogOpen(false)}
+          planItemsForDay={
+            day?.items.map((i) => ({
+              id: i.id,
+              title: i.title,
+              time: i.time,
+              category: i.category,
+            })) ?? []
+          }
+          initialFocus={dailyLogFocus}
+          onClose={() => {
+            setDailyLogOpen(false);
+            setDailyLogFocus("full");
+          }}
           onSaved={() => {
             setTodayLogExists(true);
             setDailyLogOpen(false);
+            setDailyLogFocus("full");
           }}
         />
       )}
+
+      <TripLogActionsSheet
+        open={logActionsOpen}
+        onClose={() => setLogActionsOpen(false)}
+        onSelect={handleTripLogAction}
+      />
 
       {/* Member profile sheet */}
       {profileOpen && currentMember && id && (
@@ -674,7 +730,11 @@ export function TripView() {
                     <button
                       type="button"
                       className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left"
-                      onClick={() => { setDailyLogOpen(true); setShowProfileMenu(false); }}
+                      onClick={() => {
+                        setDailyLogFocus("full");
+                        setDailyLogOpen(true);
+                        setShowProfileMenu(false);
+                      }}
                     >
                       <ClipboardList className="w-4 h-4 text-teal-400" />
                       Daily check-in
@@ -740,7 +800,10 @@ export function TripView() {
           <div className="px-5 mb-3">
             <button
               type="button"
-              onClick={() => setDailyLogOpen(true)}
+              onClick={() => {
+                setDailyLogFocus("full");
+                setDailyLogOpen(true);
+              }}
               className="w-full rounded-2xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 flex items-center justify-between gap-3 hover:bg-teal-500/10 transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -755,7 +818,7 @@ export function TripView() {
                   <p className="text-sm font-semibold text-teal-300">
                     Day {currentDayNumber} check-in waiting
                   </p>
-                  <p className="text-xs text-teal-400/60">Steps, food, funniest moment…</p>
+                  <p className="text-xs text-teal-400/60">Tap + below for food, activity, or plan link</p>
                 </div>
               </div>
               <ClipboardList className="w-4 h-4 text-teal-400/60 shrink-0" />
@@ -767,7 +830,10 @@ export function TripView() {
           <div className="px-5 mb-3">
             <button
               type="button"
-              onClick={() => setDailyLogOpen(true)}
+              onClick={() => {
+                setDailyLogFocus("full");
+                setDailyLogOpen(true);
+              }}
               className="w-full rounded-2xl border border-white/5 bg-white/[0.03] px-4 py-2.5 flex items-center gap-3 text-left hover:bg-white/[0.05] transition-colors"
             >
               <div className="w-6 h-6 rounded-full bg-teal-500/20 flex items-center justify-center">
@@ -836,14 +902,16 @@ export function TripView() {
                 </p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => openLog(null, "New memory")}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer"
-            >
-              <MapPin className="w-4 h-4" />
-              Log something new
-            </button>
+            {!showTripLogFab && (
+              <button
+                type="button"
+                onClick={() => openLog(null, "New memory")}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer"
+              >
+                <MapPin className="w-4 h-4" />
+                Log something new
+              </button>
+            )}
           </div>
         )}
 
@@ -859,15 +927,17 @@ export function TripView() {
               You’re logging as <strong>{guestName}</strong> — memories save to this trip for everyone on the
               link.
             </p>
-            <button
-              type="button"
-              disabled={!canJournal}
-              onClick={() => openLog(null, "New memory")}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer disabled:opacity-50"
-            >
-              <MapPin className="w-4 h-4" />
-              Log something new
-            </button>
+            {!showTripLogFab && (
+              <button
+                type="button"
+                disabled={!canJournal}
+                onClick={() => openLog(null, "New memory")}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-surface-muted cursor-pointer disabled:opacity-50"
+              >
+                <MapPin className="w-4 h-4" />
+                Log something new
+              </button>
+            )}
           </div>
         )}
 
@@ -1092,12 +1162,12 @@ export function TripView() {
           </div>
         )}
 
-        {showJournalFab && (
+        {showTripLogFab && (
           <button
             type="button"
-            onClick={() => openLog(null, "New memory")}
+            onClick={() => setLogActionsOpen(true)}
             className="fixed bottom-6 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 cursor-pointer"
-            aria-label="Log something new"
+            aria-label="Open log menu — journal, check-in, food, activity, or link to plan"
           >
             <Plus className="w-7 h-7" />
           </button>
