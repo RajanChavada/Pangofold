@@ -99,24 +99,47 @@ export async function upsertOwnerMember(
     onboardingPromptAnswer?: string;
   },
 ): Promise<TripMember | null> {
-  const { data, error } = await supabase
+  // Manual upsert: PostgREST `.upsert(onConflict: trip_id,user_id)` returns 400 after migration 006
+  // because the DB uses a partial unique index (WHERE user_id IS NOT NULL), not a table constraint.
+  const { data: existing, error: findErr } = await supabase
     .from("trip_members")
-    .upsert(
-      {
-        trip_id: tripId,
-        user_id: userId,
-        role: "editor",
-        display_name: fields.displayName,
-        avatar_url: fields.avatarUrl ?? null,
-        bio_blurb: fields.bioBurb ?? null,
-        fun_fact: fields.funFact ?? null,
-        onboarding_prompt_answer: fields.onboardingPromptAnswer ?? null,
+    .select("id")
+    .eq("trip_id", tripId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (findErr) return null;
+
+  const row = {
+    trip_id: tripId,
+    user_id: userId,
+    role: "editor" as const,
+    display_name: fields.displayName,
+    avatar_url: fields.avatarUrl ?? null,
+    bio_blurb: fields.bioBurb ?? null,
+    fun_fact: fields.funFact ?? null,
+    onboarding_prompt_answer: fields.onboardingPromptAnswer ?? null,
+    onboarding_completed: true,
+  };
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from("trip_members")
+      .update({
+        display_name: row.display_name,
+        avatar_url: row.avatar_url,
+        bio_blurb: row.bio_blurb,
+        fun_fact: row.fun_fact,
+        onboarding_prompt_answer: row.onboarding_prompt_answer,
         onboarding_completed: true,
-      },
-      { onConflict: "trip_id,user_id" },
-    )
-    .select("*")
-    .single();
+      })
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return rowToMember(data);
+  }
+
+  const { data, error } = await supabase.from("trip_members").insert(row).select("*").single();
   if (error || !data) return null;
   return rowToMember(data);
 }
