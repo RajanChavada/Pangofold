@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AuthResumeRedirect } from "./components/AuthResumeRedirect";
 import { Landing } from "./pages/Landing";
 import { Dashboard } from "./pages/Dashboard";
 import { TripView } from "./pages/TripView";
@@ -10,6 +11,7 @@ import { TripReport } from "./pages/TripReport";
 export function App() {
   return (
     <ErrorBoundary>
+      <AuthResumeRedirect />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/dashboard" element={<Dashboard />} />

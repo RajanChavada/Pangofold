@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { Eye, Copy, Check, Users, Loader2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/cn";
+import { CollabInviteQr } from "./CollabInviteQr";
 
 type Copied = "view" | "collab" | null;
 
@@ -82,14 +83,17 @@ export function TripShareDropdown({ tripId, shareSlug, onClose, className }: Tri
               {viewUrl}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void copy("view", viewUrl)}
-            className="shrink-0 flex items-center gap-1 rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface-muted transition-colors cursor-pointer"
-          >
-            {copied === "view" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied === "view" ? "Copied" : "Copy"}
-          </button>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void copy("view", viewUrl)}
+              className="flex items-center gap-1 rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface-muted transition-colors cursor-pointer"
+            >
+              {copied === "view" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied === "view" ? "Copied" : "Copy"}
+            </button>
+            <CollabInviteQr url={viewUrl} caption="QR · view-only link" size={112} />
+          </div>
         </div>
       </div>
 
@@ -119,15 +123,20 @@ export function TripShareDropdown({ tripId, shareSlug, onClose, className }: Tri
               </p>
             )}
           </div>
-          <button
-            type="button"
-            disabled={!collabUrl || loading}
-            onClick={() => collabUrl && void copy("collab", collabUrl)}
-            className="shrink-0 flex items-center gap-1 rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface-muted transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {copied === "collab" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied === "collab" ? "Copied" : "Copy"}
-          </button>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={!collabUrl || loading}
+              onClick={() => collabUrl && void copy("collab", collabUrl)}
+              className="flex items-center gap-1 rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface-muted transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {copied === "collab" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied === "collab" ? "Copied" : "Copy"}
+            </button>
+            {collabUrl && (
+              <CollabInviteQr url={collabUrl} caption="QR · guests scan to join & log" size={120} />
+            )}
+          </div>
         </div>
         {!loading && !collabUrl && (
           <Link

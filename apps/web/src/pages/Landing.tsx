@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import { useAuth } from "../hooks/useAuth";
+import { getSafeCollabResumePath, clearCollabResume } from "../lib/collab-resume";
 import { extractGoogleDocId, canonicalGoogleDocUrl } from "@pangofold/shared";
-import { Link } from "react-router";
 import { MapPin, FileText, Sparkles, ArrowRight, FolderOpen } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
@@ -34,7 +34,12 @@ export function Landing() {
   const [error, setError] = useState<string | null>(null);
   /** Trip already stored for this canonical doc URL (re-import overwrites parsed data from the doc). */
   const [existingTripForDoc, setExistingTripForDoc] = useState<{ id: string; title: string } | null>(null);
+  const [resumeCollabPath, setResumeCollabPath] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    setResumeCollabPath(getSafeCollabResumePath());
+  }, []);
 
   useEffect(() => {
     if (!user?.id || !docUrl.trim()) {
@@ -146,6 +151,34 @@ export function Landing() {
   return (
     <div className="min-h-dvh flex flex-col items-center justify-center px-4 py-12">
       <div className="w-full max-w-lg">
+        {resumeCollabPath && (
+          <div className="mb-8 rounded-2xl border border-primary/25 bg-primary/5 px-4 py-3 text-left">
+            <p className="text-sm font-semibold text-text">Continue with your trip invite</p>
+            <p className="text-xs text-text-muted mt-1">
+              You opened a friend-logging link in this browser. Use it to pick your profile and join onboarding.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Link
+                to={resumeCollabPath}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
+                onClick={() => clearCollabResume()}
+              >
+                Open trip invite
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+              <button
+                type="button"
+                className="text-xs text-text-muted px-3 py-2 rounded-xl border border-border hover:bg-surface-muted"
+                onClick={() => {
+                  clearCollabResume();
+                  setResumeCollabPath(null);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 mb-4 text-primary">
             <MapPin className="w-8 h-8" />

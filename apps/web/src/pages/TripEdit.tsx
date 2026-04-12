@@ -24,6 +24,7 @@ import { useAuth } from "../hooks/useAuth";
 import { supabase } from "../lib/supabase";
 import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
+import { CollabInviteQr } from "../components/CollabInviteQr";
 
 export function TripEdit() {
   const { id } = useParams();
@@ -551,18 +552,26 @@ export function TripEdit() {
                 Allow friends to log via link
               </label>
               {collabEnabled && collabToken && (
-                <div className="flex items-start gap-2">
-                  <p className="text-[11px] font-mono break-all flex-1 bg-surface-muted rounded-lg px-2 py-1.5">
-                    {`${window.location.origin}/trip/${trip.id}/collab?token=${collabToken}`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void copyCollabLink()}
-                    className="p-2 rounded-xl border border-border hover:bg-surface-muted shrink-0 cursor-pointer"
-                    title="Copy link"
-                  >
-                    {linkCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                  </button>
+                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                    <p className="text-[11px] font-mono break-all flex-1 bg-surface-muted rounded-lg px-2 py-1.5">
+                      {`${window.location.origin}/trip/${trip.id}/collab?token=${collabToken}`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void copyCollabLink()}
+                      className="p-2 rounded-xl border border-border hover:bg-surface-muted shrink-0 cursor-pointer"
+                      title="Copy link"
+                    >
+                      {linkCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <CollabInviteQr
+                    url={`${window.location.origin}/trip/${trip.id}/collab?token=${collabToken}`}
+                    caption="Scan to join — pick profile & onboard"
+                    size={128}
+                    className="sm:shrink-0 mx-auto sm:mx-0"
+                  />
                 </div>
               )}
             </div>

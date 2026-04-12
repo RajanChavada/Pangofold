@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { stashPathBeforeOAuth } from "../lib/collab-resume";
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -29,9 +30,12 @@ export function useAuth() {
   }, []);
 
   const signInWithGoogle = async () => {
+    const path = `${window.location.pathname}${window.location.search}`;
+    stashPathBeforeOAuth(path);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
+        redirectTo: `${window.location.origin}`,
         scopes: "https://www.googleapis.com/auth/documents.readonly",
         queryParams: {
           access_type: "offline",

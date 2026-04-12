@@ -41,6 +41,7 @@ import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
 import { supabase } from "../lib/supabase";
 import { personDisplayKey } from "../lib/trip-report";
+import { rememberCollabInviteUrl } from "../lib/collab-resume";
 import { collectPhotosFromEntries, journalEntriesForDay } from "../lib/journal-photos";
 import type { TripMember } from "@pangofold/shared";
 
@@ -271,6 +272,12 @@ export function TripView() {
         }
       });
   }, [isCollab, id, tokenFromUrl]);
+
+  // Let guests re-open this invite from Home / Dashboard if they navigate away
+  useEffect(() => {
+    if (!isCollab || gate !== "ok" || !tokenFromUrl) return;
+    rememberCollabInviteUrl(window.location.href);
+  }, [isCollab, gate, tokenFromUrl]);
 
   // Derive current member display name for collab or owner
   const currentMember =
@@ -599,6 +606,11 @@ export function TripView() {
           }
           members={carouselMembers}
           loading={loadingMembers}
+          inviteUrl={
+            id && tokenFromUrl
+              ? `${window.location.origin}/trip/${id}/collab?token=${encodeURIComponent(tokenFromUrl)}`
+              : undefined
+          }
           onSelect={(member) => {
             setMember(member);
             setIdentityScreen(null);

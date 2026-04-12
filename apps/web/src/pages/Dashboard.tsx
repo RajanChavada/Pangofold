@@ -15,6 +15,7 @@ import {
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TripShareDropdown } from "../components/TripShareDropdown";
 import { cn } from "../lib/cn";
+import { getSafeCollabResumePath, clearCollabResume } from "../lib/collab-resume";
 
 interface TripSummary {
   id: string;
@@ -36,6 +37,11 @@ export function Dashboard() {
   const [shareMenu, setShareMenu] = useState<{ tripId: string; from: "header" | "row" } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [resumeCollabPath, setResumeCollabPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    setResumeCollabPath(getSafeCollabResumePath());
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -120,6 +126,34 @@ export function Dashboard() {
         }}
       />
       <div className="max-w-2xl mx-auto px-5 py-8">
+        {resumeCollabPath && (
+          <div className="mb-6 rounded-2xl border border-primary/25 bg-primary/5 px-4 py-3">
+            <p className="text-sm font-semibold text-text">Trip invite in this browser</p>
+            <p className="text-xs text-text-muted mt-1">
+              Open the friend-logging link again to continue as a guest (profile / onboarding).
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Link
+                to={resumeCollabPath}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
+                onClick={() => clearCollabResume()}
+              >
+                Open invite
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+              <button
+                type="button"
+                className="text-xs text-text-muted px-3 py-2 rounded-xl border border-border hover:bg-surface-muted"
+                onClick={() => {
+                  clearCollabResume();
+                  setResumeCollabPath(null);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-2">

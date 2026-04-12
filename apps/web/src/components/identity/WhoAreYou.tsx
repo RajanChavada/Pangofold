@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, ChevronRight } from "lucide-react";
+import { Plus, ChevronRight, Link2, Check } from "lucide-react";
 import type { TripMember } from "@pangofold/shared";
 import { cn } from "../../lib/cn";
 
@@ -13,6 +13,8 @@ interface WhoAreYouProps {
   onSelect: (member: TripMember) => void;
   onNewMember: () => void;
   loading?: boolean;
+  /** Full collaborate URL — shows “copy invite” so guests can return if they leave this page */
+  inviteUrl?: string;
 }
 
 function initials(name: string | null | undefined): string {
@@ -85,9 +87,11 @@ export function WhoAreYou({
   onSelect,
   onNewMember,
   loading = false,
+  inviteUrl,
 }: WhoAreYouProps) {
   const [selected, setSelected] = useState<TripMember | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -234,6 +238,31 @@ export function WhoAreYou({
           <p className="text-[11px] text-text-muted text-center leading-relaxed px-1">
             Identity is trip-scoped. You can switch anytime from your profile.
           </p>
+
+          {inviteUrl && (
+            <div className="rounded-xl border border-border bg-surface-muted/50 px-3 py-2.5 space-y-2">
+              <p className="text-[11px] text-text-muted text-center leading-snug">
+                If you used the back button or left this page, paste or open your invite link again — or copy it here.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(inviteUrl).then(() => {
+                    setInviteCopied(true);
+                    setTimeout(() => setInviteCopied(false), 2000);
+                  });
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium border border-border bg-surface-card hover:bg-surface-muted transition-colors"
+              >
+                {inviteCopied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5 text-primary" />
+                )}
+                {inviteCopied ? "Copied invite link" : "Copy invite link"}
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
     </div>
