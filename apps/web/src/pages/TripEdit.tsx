@@ -52,6 +52,12 @@ export function TripEdit() {
   const coverFileRef = useRef<HTMLInputElement>(null);
   const [resyncing, setResyncing] = useState(false);
   const [resyncMessage, setResyncMessage] = useState<string | null>(null);
+  // Onboarding prompts for the crew
+  const [onboardPrompt1, setOnboardPrompt1] = useState("What are you most excited about?");
+  const [onboardPrompt2, setOnboardPrompt2] = useState("What is your one must-eat on this trip?");
+  const [onboardFunFact, setOnboardFunFact] = useState("Most likely to _____ on this trip?");
+  const [dailyLogPromptText, setDailyLogPromptText] = useState("");
+  const [promptsSaved, setPromptsSaved] = useState(false);
 
   const handleResyncDoc = useCallback(async () => {
     if (!trip?.sourceDocUrl || useMock) return;
@@ -131,6 +137,15 @@ export function TripEdit() {
   useEffect(() => {
     if (trip?.coverImageUrl) setCoverInput(trip.coverImageUrl);
   }, [trip?.coverImageUrl]);
+
+  useEffect(() => {
+    if (!trip?.onboardingPrompts) return;
+    const p = trip.onboardingPrompts;
+    if (p.prompt_1) setOnboardPrompt1(p.prompt_1);
+    if (p.prompt_2) setOnboardPrompt2(p.prompt_2);
+    if (p.fun_fact) setOnboardFunFact(p.fun_fact);
+    if (trip.dailyLogPrompt) setDailyLogPromptText(trip.dailyLogPrompt);
+  }, [trip?.onboardingPrompts, trip?.dailyLogPrompt]);
 
   useEffect(() => {
     if (!id || useMock) return;
@@ -264,6 +279,21 @@ export function TripEdit() {
     } catch {
       /* ignore */
     }
+  };
+
+  const saveOnboardingPrompts = async () => {
+    if (!trip || useMock) return;
+    setPromptsSaved(false);
+    await updateTripMeta({
+      onboardingPrompts: {
+        prompt_1: onboardPrompt1.trim(),
+        prompt_2: onboardPrompt2.trim(),
+        fun_fact: onboardFunFact.trim(),
+      },
+      dailyLogPrompt: dailyLogPromptText.trim() || null,
+    });
+    setPromptsSaved(true);
+    setTimeout(() => setPromptsSaved(false), 2500);
   };
 
   const saveCoverUrl = async () => {
@@ -565,6 +595,64 @@ export function TripEdit() {
                   ))}
                 </ul>
               )}
+            </div>
+
+            <div className="bg-surface-card rounded-2xl border border-border p-4 space-y-3">
+              <h2 className="text-sm font-semibold">Crew onboarding questions</h2>
+              <p className="text-xs text-text-muted">
+                Guests see these when they join via the friend link. Customize per trip (golf vs beach).
+              </p>
+              <div className="space-y-2">
+                <label className="block text-[11px] font-medium text-text-muted uppercase tracking-wide">
+                  Prompt 1 (name + vibe step)
+                </label>
+                <input
+                  value={onboardPrompt1}
+                  onChange={(e) => setOnboardPrompt1(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="What are you most excited about?"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-[11px] font-medium text-text-muted uppercase tracking-wide">
+                  Prompt 2 (optional follow-up)
+                </label>
+                <input
+                  value={onboardPrompt2}
+                  onChange={(e) => setOnboardPrompt2(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="What is your one must-eat on this trip?"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-[11px] font-medium text-text-muted uppercase tracking-wide">
+                  Fun fact prompt (step 3)
+                </label>
+                <input
+                  value={onboardFunFact}
+                  onChange={(e) => setOnboardFunFact(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="Most likely to _____ on this trip?"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-[11px] font-medium text-text-muted uppercase tracking-wide">
+                  Custom daily check-in question (optional)
+                </label>
+                <input
+                  value={dailyLogPromptText}
+                  onChange={(e) => setDailyLogPromptText(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="e.g. What's your word of the day?"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveOnboardingPrompts()}
+                className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 cursor-pointer"
+              >
+                {promptsSaved ? "Saved!" : "Save crew questions"}
+              </button>
             </div>
           </div>
         )}

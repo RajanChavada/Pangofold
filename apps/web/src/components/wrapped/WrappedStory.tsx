@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, animate, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { JournalEntry, PersonTripStats, SuperlativeId, Trip, TripReportPayload } from "@pangofold/shared";
+import type {
+  DailyLog,
+  JournalEntry,
+  PersonTripStats,
+  SuperlativeId,
+  Trip,
+  TripMember,
+  TripReportPayload,
+} from "@pangofold/shared";
 import {
   collectItemMap,
   heroPhotoForPerson,
@@ -11,6 +19,8 @@ import {
 } from "../../lib/wrapped-helpers";
 import { cn } from "../../lib/cn";
 
+const TEAL = "#2DD4BF";
+
 const SUPERLATIVE_LABEL: Record<SuperlativeId, string> = {
   foodie: "The Foodie",
   highRoller: "High Roller",
@@ -18,44 +28,120 @@ const SUPERLATIVE_LABEL: Record<SuperlativeId, string> = {
   navigator: "The Navigator",
 };
 
-const THEMES = [
-  { gradient: "from-amber-500 via-orange-600 to-rose-900", accent: "text-amber-100" },
-  { gradient: "from-violet-600 via-purple-800 to-slate-950", accent: "text-violet-100" },
-  { gradient: "from-emerald-600 via-teal-800 to-slate-950", accent: "text-emerald-100" },
-  { gradient: "from-sky-600 via-blue-800 to-indigo-950", accent: "text-sky-100" },
-  { gradient: "from-pink-600 via-fuchsia-800 to-purple-950", accent: "text-pink-100" },
-  { gradient: "from-lime-700 via-green-800 to-emerald-950", accent: "text-lime-100" },
-];
+// Per-card gradient identities
+const CARD_THEMES: Record<string, { gradient: string; accent: string }> = {
+  intro:       { gradient: "from-amber-500 via-orange-600 to-rose-900", accent: "text-amber-100" },
+  crew:        { gradient: "from-teal-700 via-teal-900 to-slate-950", accent: "text-teal-200" },
+  tripNumbers: { gradient: "from-teal-600 via-emerald-800 to-slate-950", accent: "text-teal-200" },
+  total:       { gradient: "from-violet-600 via-purple-800 to-slate-950", accent: "text-violet-200" },
+  categories:  { gradient: "from-violet-600 via-purple-800 to-slate-950", accent: "text-violet-200" },
+  biggestSpender: { gradient: "from-violet-700 via-indigo-900 to-slate-950", accent: "text-indigo-200" },
+  foodVerdict: { gradient: "from-amber-600 via-orange-800 to-stone-950", accent: "text-amber-200" },
+  person:      { gradient: "from-emerald-600 via-teal-800 to-slate-950", accent: "text-emerald-200" },
+  superlatives:{ gradient: "from-sky-600 via-blue-800 to-indigo-950", accent: "text-sky-200" },
+  settlement:  { gradient: "from-slate-600 via-slate-800 to-slate-950", accent: "text-slate-300" },
+  bestMoment:  { gradient: "from-pink-600 via-fuchsia-800 to-purple-950", accent: "text-pink-200" },
+  funniestMoments: { gradient: "from-violet-800 via-purple-900 to-slate-950", accent: "text-purple-200" },
+  photoGrid:   { gradient: "from-zinc-800 via-zinc-900 to-black", accent: "text-zinc-300" },
+  crewProfiles:{ gradient: "from-teal-700 via-slate-900 to-slate-950", accent: "text-teal-200" },
+  outro:       { gradient: "from-amber-500 via-orange-600 to-rose-900", accent: "text-amber-100" },
+};
+
+function getTheme(kind: string) {
+  return CARD_THEMES[kind] ?? CARD_THEMES.intro!;
+}
 
 export type WrappedSlide =
   | { id: string; kind: "intro" }
+  | { id: string; kind: "crew" }
+  | { id: string; kind: "tripNumbers" }
   | { id: string; kind: "total" }
   | { id: string; kind: "categories" }
+  | { id: string; kind: "biggestSpender" }
+  | { id: string; kind: "foodVerdict" }
   | { id: string; kind: "person"; person: PersonTripStats }
   | { id: string; kind: "superlatives" }
   | { id: string; kind: "settlement" }
   | { id: string; kind: "bestMoment" }
+  | { id: string; kind: "funniestMoments" }
   | { id: string; kind: "photoGrid" }
+  | { id: string; kind: "crewProfiles" }
   | { id: string; kind: "outro" };
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
-function buildSlideList(payload: TripReportPayload, entries: JournalEntry[]): WrappedSlide[] {
+function formatTripDateRange(start?: string, end?: string): string {
+  if (!start) return "";
+  try {
+    const fmt = (iso: string) =>
+      new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const year = new Date(start + "T00:00:00").getFullYear();
+    return end
+      ? `${fmt(start)} – ${fmt(end)}, ${year}`
+      : `${fmt(start)}, ${year}`;
+  } catch {
+    return start;
+  }
+}
+
+function buildSlideList(
+  payload: TripReportPayload,
+  entries: JournalEntry[],
+  members: TripMember[],
+  dailyLogs: DailyLog[],
+): WrappedSlide[] {
   const slides: WrappedSlide[] = [{ id: "intro", kind: "intro" }];
+
+  // Crew slide if we have member profiles
+  if (members.length > 0) slides.push({ id: "crew", kind: "crew" });
+
+  // Trip in numbers
+  const hasNumbers = payload.totalSpendCents > 0 || entries.length > 0;
+  if (hasNumbers) slides.push({ id: "tripNumbers", kind: "tripNumbers" });
+
+  // Total spend
   if (payload.totalSpendCents > 0) slides.push({ id: "total", kind: "total" });
+
+  // Categories
   const cats = Object.entries(payload.spendByCategory).filter(([, v]) => v > 0);
   if (cats.length > 0) slides.push({ id: "cats", kind: "categories" });
+
+  // Biggest spender
+  if (payload.perPerson.length > 1) slides.push({ id: "bigSpender", kind: "biggestSpender" });
+
+  // Food verdict from daily logs
+  const hasFood = dailyLogs.some((l) => l.bestFoodText || l.worstFoodText);
+  if (hasFood) slides.push({ id: "food", kind: "foodVerdict" });
+
+  // Per person
   for (const p of payload.perPerson) {
     slides.push({ id: `person-${p.name}`, kind: "person", person: p });
   }
+
+  // Superlatives
   const hasSuper = Object.values(payload.superlatives).some(Boolean);
   if (hasSuper) slides.push({ id: "super", kind: "superlatives" });
+
+  // Settlement
   if (payload.settlement.length > 0) slides.push({ id: "settle", kind: "settlement" });
+
+  // Best moment
   if (payload.bestRated) slides.push({ id: "best", kind: "bestMoment" });
-  const urls = journalPhotoUrls(entries, 6);
-  if (urls.length > 0) slides.push({ id: "photos", kind: "photoGrid" });
+
+  // Funniest moments reveal
+  const hasFunny = dailyLogs.some((l) => l.funniestMoment);
+  if (hasFunny) slides.push({ id: "funny", kind: "funniestMoments" });
+
+  // Photo grid
+  const photoUrls = journalPhotoUrls(entries, 6);
+  if (photoUrls.length > 0) slides.push({ id: "photos", kind: "photoGrid" });
+
+  // Crew profiles
+  const hasProfiles = members.some((m) => m.onboardingPromptAnswer || m.funFact);
+  if (hasProfiles) slides.push({ id: "crewProfiles", kind: "crewProfiles" });
+
   slides.push({ id: "outro", kind: "outro" });
   return slides;
 }
@@ -64,7 +150,7 @@ function AnimatedCents({ cents }: { cents: number }) {
   const [v, setV] = useState(0);
   useEffect(() => {
     const controls = animate(0, cents, {
-      duration: 1.05,
+      duration: 1.2,
       ease: [0.22, 1, 0.36, 1],
       onUpdate: (latest) => setV(Math.round(latest)),
     });
@@ -73,17 +159,115 @@ function AnimatedCents({ cents }: { cents: number }) {
   return <span className="tabular-nums">{formatMoney(v)}</span>;
 }
 
+function AnimatedInt({ value }: { value: number }) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    const controls = animate(0, value, {
+      duration: 1.0,
+      ease: [0.22, 1, 0.36, 1],
+      onUpdate: (latest) => setV(Math.round(latest)),
+    });
+    return () => controls.stop();
+  }, [value]);
+  return <span className="tabular-nums">{v.toLocaleString()}</span>;
+}
+
+function LazyPhoto({
+  src,
+  className,
+  attribution,
+}: {
+  src: string;
+  className?: string;
+  attribution?: string;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState(false);
+  return (
+    <div className={cn("relative overflow-hidden", className)}>
+      {!loaded && !err && (
+        <div className="absolute inset-0 animate-pulse bg-white/10" />
+      )}
+      {!err && (
+        <img
+          src={src}
+          alt={attribution ?? ""}
+          className={cn("w-full h-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+          loading="lazy"
+          onLoad={() => setLoaded(true)}
+          onError={() => setErr(true)}
+        />
+      )}
+      {err && (
+        <div className="absolute inset-0 bg-white/5 flex items-center justify-center text-white/20 text-xs">
+          No photo
+        </div>
+      )}
+      {attribution && loaded && (
+        <div className="absolute bottom-1 right-1 text-[10px] text-white/60 bg-black/40 px-1 rounded-sm">
+          {attribution}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MemberAvatar({ member, size = 40 }: { member: TripMember; size?: number }) {
+  const [err, setErr] = useState(false);
+  const initials = (member.displayName ?? "?")
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+  return (
+    <div
+      className="rounded-full overflow-hidden flex items-center justify-center font-bold text-white shrink-0"
+      style={{
+        width: size,
+        height: size,
+        background:
+          member.avatarUrl && !err ? undefined : `linear-gradient(135deg, ${TEAL}, #0891b2)`,
+        fontSize: size * 0.36,
+        boxShadow: `0 0 0 2px ${TEAL}60`,
+      }}
+    >
+      {member.avatarUrl && !err ? (
+        <img
+          src={member.avatarUrl}
+          alt=""
+          className="w-full h-full object-cover"
+          onError={() => setErr(true)}
+        />
+      ) : (
+        initials
+      )}
+    </div>
+  );
+}
+
 interface WrappedStoryProps {
   trip: Trip;
   payload: TripReportPayload;
   entries: JournalEntry[];
+  members?: TripMember[];
+  dailyLogs?: DailyLog[];
   exportRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStoryProps) {
+export function WrappedStory({
+  trip,
+  payload,
+  entries,
+  members = [],
+  dailyLogs = [],
+  exportRef,
+}: WrappedStoryProps) {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
-  const slides = useMemo(() => buildSlideList(payload, entries), [payload, entries]);
+  const slides = useMemo(
+    () => buildSlideList(payload, entries, members, dailyLogs),
+    [payload, entries, members, dailyLogs],
+  );
   const itemById = useMemo(() => collectItemMap(trip), [trip]);
 
   useEffect(() => {
@@ -113,7 +297,7 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
   }, [go]);
 
   const slide = slides[index]!;
-  const theme = THEMES[index % THEMES.length]!;
+  const theme = getTheme(slide.kind);
 
   const slideVariants = {
     enter: (d: number) => ({ x: d > 0 ? "100%" : "-100%", opacity: 0 }),
@@ -125,27 +309,111 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
     const g = `bg-gradient-to-br ${theme.gradient}`;
     const sub = theme.accent;
 
+    // Aggregate daily log data helpers
+    const allBestFoods = dailyLogs.filter((l) => l.bestFoodText);
+    const allFunniestMoments = dailyLogs.filter((l) => l.funniestMoment);
+    const totalGroupSteps = dailyLogs.reduce((s, l) => s + (l.stepsCount ?? 0), 0);
+    const totalPhotos = entries.flatMap((e) => e.photos ?? []).length;
+
+    // Member by id lookup
+    const memberById = Object.fromEntries(members.map((m) => [m.id, m]));
+
     switch (slide.kind) {
       case "intro":
         return (
           <div className={cn("flex h-full flex-col justify-between p-8 text-white", g)}>
             <div>
-              <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>Pangofold Wrapped</p>
-              <p className="mt-6 text-7xl font-black leading-none opacity-90">2026</p>
+              <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
+                Pangofold Wrapped
+              </p>
+              <p className="mt-6 text-7xl font-black leading-none opacity-90">
+                {new Date().getFullYear()}
+              </p>
               <h1 className="mt-4 text-3xl font-bold leading-tight">{trip.title}</h1>
-              {trip.startDate && trip.endDate && (
-                <p className={cn("mt-3 text-sm", sub)}>{trip.startDate} → {trip.endDate}</p>
+              {trip.startDate && (
+                <p className={cn("mt-3 text-sm", sub)}>
+                  {formatTripDateRange(trip.startDate, trip.endDate)}
+                </p>
               )}
             </div>
             <div className="relative h-40 w-full overflow-hidden rounded-2xl border-2 border-white/30 bg-black/20">
               {trip.coverImageUrl ? (
-                <img src={trip.coverImageUrl} alt="" className="h-full w-full object-cover" />
+                <LazyPhoto src={trip.coverImageUrl} className="h-full w-full" />
               ) : (
-                <div className="flex h-full items-center justify-center text-sm text-white/70">Your trip</div>
+                <div className="flex h-full items-center justify-center text-sm text-white/40">
+                  Your trip
+                </div>
               )}
             </div>
           </div>
         );
+
+      case "crew":
+        return (
+          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 text-white", g)}>
+            <div>
+              <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
+                The crew
+              </p>
+              <p className="text-5xl font-black leading-none">
+                {members.length} {members.length === 1 ? "person" : "people"}
+              </p>
+              <p className={cn("mt-3 text-base", sub)}>
+                {trip.destinations.length} destination{trip.destinations.length !== 1 ? "s" : ""}
+                {trip.startDate && trip.endDate && (
+                  <>
+                    {" "}· {formatTripDateRange(trip.startDate, trip.endDate)}
+                  </>
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {members.map((m, i) => (
+                <motion.div
+                  key={m.id}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.08 * i, type: "spring", stiffness: 300, damping: 24 }}
+                  className="flex flex-col items-center gap-2"
+                >
+                  <MemberAvatar member={m} size={56} />
+                  <p className="text-xs font-medium text-white/70">{m.displayName ?? "—"}</p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case "tripNumbers":
+        return (
+          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
+            <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
+              The numbers
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <NumberTile
+                label="Total spent"
+                sub={sub}
+                value={<AnimatedCents cents={payload.totalSpendCents} />}
+              />
+              <NumberTile label="Memories logged" sub={sub} value={<AnimatedInt value={entries.length} />} />
+              <NumberTile label="Photos taken" sub={sub} value={<AnimatedInt value={totalPhotos} />} />
+              {totalGroupSteps > 0 && (
+                <NumberTile
+                  label="Steps walked"
+                  sub={sub}
+                  value={<AnimatedInt value={totalGroupSteps} />}
+                />
+              )}
+            </div>
+            {totalGroupSteps > 0 && (
+              <p className={cn("text-xs", sub)}>
+                You collectively walked {Math.round(totalGroupSteps / 1300)} km.
+              </p>
+            )}
+          </div>
+        );
+
       case "total":
         return (
           <div className={cn("flex h-full flex-col justify-center px-8 text-white", g)}>
@@ -154,10 +422,11 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
               <AnimatedCents cents={payload.totalSpendCents} />
             </div>
             <p className={cn("mt-6 max-w-[280px] text-base leading-relaxed", sub)}>
-              Every meal, ride, and memory you logged — in one number.
+              Every meal, ride, and memory — in one number.
             </p>
           </div>
         );
+
       case "categories": {
         const sorted = (Object.entries(payload.spendByCategory) as [string, number][])
           .filter(([, v]) => v > 0)
@@ -166,7 +435,7 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
         const max = sorted[0]?.[1] ?? 1;
         return (
           <div className={cn("flex h-full flex-col justify-center gap-6 px-8 py-10 text-white", g)}>
-            <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Where the money went</p>
+            <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Where it went</p>
             <ul className="space-y-4">
               {sorted.map(([k, v]) => (
                 <li key={k} className="space-y-1">
@@ -188,47 +457,142 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
           </div>
         );
       }
+
+      case "biggestSpender": {
+        const sorted = [...payload.perPerson].sort(
+          (a, b) => b.attributedSpendCents - a.attributedSpendCents,
+        );
+        const top = sorted[0];
+        const bestValue = [...payload.perPerson].sort(
+          (a, b) =>
+            (b.photoCount + b.logCount) / Math.max(b.attributedSpendCents, 1) -
+            (a.photoCount + a.logCount) / Math.max(a.attributedSpendCents, 1),
+        )[0];
+        return (
+          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
+            <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
+              The tab
+            </p>
+            {top && (
+              <div className="rounded-2xl bg-white/10 border border-white/10 p-5">
+                <p className={cn("text-[10px] uppercase tracking-wide mb-2", sub)}>
+                  Highest spend
+                </p>
+                <p className="text-2xl font-black">{top.name}</p>
+                <p className={cn("mt-1 text-xl font-bold", sub)}>
+                  {formatMoney(top.attributedSpendCents)}
+                </p>
+              </div>
+            )}
+            {bestValue && bestValue.name !== top?.name && (
+              <div className="rounded-2xl bg-white/10 border border-white/10 p-5">
+                <p className={cn("text-[10px] uppercase tracking-wide mb-2", sub)}>
+                  Best value (most memories per dollar)
+                </p>
+                <p className="text-2xl font-black">{bestValue.name}</p>
+              </div>
+            )}
+            {payload.settlement.length > 0 && (
+              <p className={cn("text-xs", sub)}>
+                Settle up on the next slide.
+              </p>
+            )}
+          </div>
+        );
+      }
+
+      case "foodVerdict": {
+        const grouped = allBestFoods.reduce<Record<string, string[]>>((acc, l) => {
+          const key = l.memberId;
+          acc[key] = acc[key] ?? [];
+          acc[key].push(l.bestFoodText!);
+          return acc;
+        }, {});
+        const topBites = Object.entries(grouped)
+          .slice(0, 3)
+          .map(([memberId, texts]) => ({ member: memberById[memberId], text: texts[0] ?? "" }));
+        const worstLog = dailyLogs
+          .filter((l) => l.worstFoodText)
+          .sort(() => Math.random() - 0.5)[0];
+        return (
+          <div className={cn("flex h-full flex-col justify-center gap-4 px-8 text-white", g)}>
+            <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
+              Food verdict
+            </p>
+            <p className="text-sm font-bold text-white/60 uppercase tracking-wide">
+              Top bites
+            </p>
+            <div className="space-y-3">
+              {topBites.map(({ member: m, text }, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 * i }}
+                  className="rounded-2xl bg-white/10 border border-white/10 p-4"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {m && <MemberAvatar member={m} size={24} />}
+                    <p className="text-[11px] text-white/50">{m?.displayName ?? "Someone"}</p>
+                  </div>
+                  <p className="text-sm font-semibold">"{text}"</p>
+                </motion.div>
+              ))}
+            </div>
+            {worstLog && (
+              <div className={cn("text-xs mt-2", sub)}>
+                💀 Most regrettable:{" "}
+                <span className="italic">"{worstLog.worstFoodText}"</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       case "person": {
         const p = slide.person;
         const hero = heroPhotoForPerson(entries, p.name);
         const topCat = topSpendCategoryForPerson(entries, p.name, itemById);
         const badges = personSuperlatives(p.name, payload.superlatives);
+        const memberProfile = members.find((m) => m.displayName === p.name);
+        const memberSteps = dailyLogs
+          .filter((l) => l.memberId === memberProfile?.id)
+          .reduce((s, l) => s + (l.stepsCount ?? 0), 0);
         return (
           <div className={cn("flex h-full flex-col text-white", g)}>
             <div className="relative h-[42%] min-h-[160px] w-full overflow-hidden border-b border-white/10">
               {hero ? (
-                <img src={hero} alt="" className="h-full w-full object-cover" />
+                <LazyPhoto src={hero} className="h-full w-full" />
               ) : (
-                <div className="flex h-full items-center justify-center bg-black/30 text-sm text-white/70">
-                  No photo yet — keep logging!
+                <div className="flex h-full items-center justify-center bg-black/30 text-sm text-white/40">
+                  {memberProfile ? (
+                    <MemberAvatar member={memberProfile} size={80} />
+                  ) : (
+                    "No photo yet — keep logging!"
+                  )}
                 </div>
               )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
               <p className={cn("absolute bottom-4 left-6 text-xs uppercase tracking-widest", sub)}>Traveler</p>
               <h2 className="absolute bottom-8 left-6 right-6 text-3xl font-bold leading-tight">{p.name}</h2>
             </div>
             <div className="flex flex-1 flex-col justify-center gap-4 px-8 py-6">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm">
-                  <p className={cn("text-[10px] uppercase tracking-wide", sub)}>Share of spend</p>
-                  <p className="text-xl font-bold tabular-nums">{formatMoney(p.attributedSpendCents)}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm">
-                  <p className={cn("text-[10px] uppercase tracking-wide", sub)}>Logs</p>
-                  <p className="text-xl font-bold">{p.logCount}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm">
-                  <p className={cn("text-[10px] uppercase tracking-wide", sub)}>Photos</p>
-                  <p className="text-xl font-bold">{p.photoCount}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm">
-                  <p className={cn("text-[10px] uppercase tracking-wide", sub)}>Food stops</p>
-                  <p className="text-xl font-bold">{p.foodLogCount}</p>
-                </div>
+                <StatCell label="Share of spend" value={formatMoney(p.attributedSpendCents)} sub={sub} />
+                <StatCell label="Logs" value={String(p.logCount)} sub={sub} />
+                <StatCell label="Photos" value={String(p.photoCount)} sub={sub} />
+                {memberSteps > 0 && (
+                  <StatCell label="Steps" value={memberSteps.toLocaleString()} sub={sub} />
+                )}
               </div>
               {topCat && (
                 <p className={cn("text-sm", sub)}>
                   Top category: <strong className="text-white">{topCat}</strong>
+                </p>
+              )}
+              {memberProfile?.onboardingPromptAnswer && (
+                <p className={cn("text-xs italic", sub)}>
+                  "{memberProfile.onboardingPromptAnswer}"
                 </p>
               )}
               {badges.length > 0 && (
@@ -244,29 +608,56 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
           </div>
         );
       }
+
       case "superlatives":
         return (
           <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-white", g)}>
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Superlatives</p>
             <ul className="space-y-4">
-              {(Object.keys(payload.superlatives) as SuperlativeId[]).map((key) => {
+              {(Object.keys(payload.superlatives) as SuperlativeId[]).map((key, i) => {
                 const name = payload.superlatives[key];
+                if (!name) return null;
                 return (
                   <motion.li
                     key={key}
                     initial={{ opacity: 0, x: -12 }}
                     animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.08 * (["foodie", "highRoller", "historian", "navigator"].indexOf(key) + 1) }}
+                    transition={{ delay: 0.08 * i }}
                     className="flex items-center justify-between border-b border-white/10 pb-3 last:border-0"
                   >
                     <span className="font-semibold">{SUPERLATIVE_LABEL[key]}</span>
-                    <span className="text-lg font-bold">{name ?? "—"}</span>
+                    <span className="text-lg font-bold">{name}</span>
                   </motion.li>
                 );
               })}
             </ul>
+            {/* Auto-generated from data */}
+            {payload.perPerson.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {[
+                  {
+                    label: "Most photos",
+                    winner: [...payload.perPerson].sort((a, b) => b.photoCount - a.photoCount)[0],
+                    stat: (p: PersonTripStats) => `${p.photoCount} photos`,
+                  },
+                  {
+                    label: "Most logs",
+                    winner: [...payload.perPerson].sort((a, b) => b.logCount - a.logCount)[0],
+                    stat: (p: PersonTripStats) => `${p.logCount} logs`,
+                  },
+                ]
+                  .filter(({ winner }) => winner && winner.logCount > 0)
+                  .map(({ label, winner, stat }) => (
+                    <div key={label} className={cn("text-xs", sub)}>
+                      {label}: <strong className="text-white">{winner!.name}</strong>{" "}
+                      ({stat(winner!)})
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         );
+
       case "settlement":
         return (
           <div className={cn("flex h-full flex-col justify-center gap-4 px-8 text-white", g)}>
@@ -283,25 +674,65 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
             </ul>
           </div>
         );
+
       case "bestMoment":
         return (
           <div className={cn("flex h-full flex-col justify-between p-8 text-white", g)}>
             <div>
               <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>Best moment</p>
               <p className="mt-6 text-2xl font-bold leading-snug">{payload.bestRated?.title}</p>
-              <p className="mt-2 text-5xl font-black">{payload.bestRated?.rating ?? "—"}<span className="text-2xl">/5</span></p>
+              <p className="mt-2 text-5xl font-black">
+                {payload.bestRated?.rating ?? "—"}
+                <span className="text-2xl">/5</span>
+              </p>
             </div>
             {entries.find((e) => e.id === payload.bestRated?.entryId)?.photos?.[0]?.publicUrl && (
               <div className="mt-4 h-44 overflow-hidden rounded-2xl border border-white/20">
-                <img
+                <LazyPhoto
                   src={entries.find((e) => e.id === payload.bestRated?.entryId)!.photos![0]!.publicUrl!}
-                  alt=""
-                  className="h-full w-full object-cover"
+                  className="h-full w-full"
                 />
               </div>
             )}
           </div>
         );
+
+      case "funniestMoments": {
+        // Group by member
+        const byMember: { member: TripMember | undefined; moment: string }[] =
+          allFunniestMoments.map((l) => ({
+            member: memberById[l.memberId],
+            moment: l.funniestMoment!,
+          }));
+        return (
+          <div className={cn("flex h-full flex-col p-8 text-white", g)}>
+            <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-2", sub)}>
+              Funniest moments
+            </p>
+            <p className="text-xs text-white/30 mb-5">Private during the trip · revealed now</p>
+            <div className="space-y-3 overflow-y-auto flex-1">
+              {byMember.map(({ member: m, moment }, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.12 * i, type: "spring", stiffness: 280, damping: 26 }}
+                  className="rounded-2xl bg-white/10 border border-white/10 p-4"
+                >
+                  {m && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <MemberAvatar member={m} size={20} />
+                      <p className="text-[11px] text-white/50">{m.displayName}</p>
+                    </div>
+                  )}
+                  <p className="text-sm font-semibold leading-snug">"{moment}"</p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
       case "photoGrid": {
         const urls = journalPhotoUrls(entries, 6);
         return (
@@ -309,39 +740,79 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
             <p className={cn("text-sm font-medium uppercase tracking-widest", sub)}>The reel</p>
             <div className="grid grid-cols-3 gap-2">
               {urls.map((url, i) => (
-                <motion.img
+                <motion.div
                   key={url + i}
-                  src={url}
-                  alt=""
-                  className="aspect-square rounded-lg object-cover"
-                  initial={{ opacity: 0, scale: 0.92 }}
+                  initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: 0.06 * i }}
-                />
+                  className="aspect-square rounded-xl overflow-hidden"
+                >
+                  <LazyPhoto src={url} className="h-full w-full" />
+                </motion.div>
               ))}
             </div>
           </div>
         );
       }
+
+      case "crewProfiles":
+        return (
+          <div className={cn("flex h-full flex-col p-8 text-white", g)}>
+            <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-6", sub)}>
+              The crew
+            </p>
+            <div className="space-y-4 overflow-y-auto flex-1">
+              {members
+                .filter((m) => m.onboardingPromptAnswer || m.funFact)
+                .map((m, i) => (
+                  <motion.div
+                    key={m.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 * i }}
+                    className="flex gap-3"
+                  >
+                    <MemberAvatar member={m} size={40} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold">{m.displayName}</p>
+                      {m.onboardingPromptAnswer && (
+                        <p className={cn("text-xs mt-0.5 line-clamp-2", sub)}>
+                          {m.onboardingPromptAnswer}
+                        </p>
+                      )}
+                      {m.funFact && (
+                        <p className="text-xs text-white/30 italic mt-0.5 line-clamp-1">
+                          {m.funFact}
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+            </div>
+          </div>
+        );
+
       case "outro":
         return (
           <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-white", g)}>
             <SparklesGlyph />
             <div>
-              <p className="text-2xl font-bold">That’s a wrap</p>
+              <p className="text-2xl font-bold">That's a wrap</p>
               <p className={cn("mt-3 text-sm leading-relaxed", sub)}>
                 Scroll down for maps, categories, and the full breakdown — or swipe through again anytime.
               </p>
             </div>
           </div>
         );
+
       default:
         return null;
     }
-  }, [slide, trip, payload, entries, itemById, theme]);
+  }, [slide, trip, payload, entries, members, dailyLogs, itemById, theme]);
 
   return (
     <div className="relative w-full">
+      {/* Progress bar */}
       <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-black/10">
         <motion.div
           className="h-full rounded-full bg-primary"
@@ -392,6 +863,34 @@ export function WrappedStory({ trip, payload, entries, exportRef }: WrappedStory
           <ChevronRight className="h-10 w-10 drop-shadow-lg" />
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function StatCell({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="rounded-xl bg-white/10 p-3 backdrop-blur-sm">
+      <p className={cn("text-[10px] uppercase tracking-wide", sub)}>{label}</p>
+      <p className="text-xl font-bold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function NumberTile({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub: string;
+}) {
+  return (
+    <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+      <p className={cn("text-[10px] uppercase tracking-wide mb-1", sub)}>{label}</p>
+      <p className="text-xl font-black">{value}</p>
     </div>
   );
 }

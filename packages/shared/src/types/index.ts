@@ -20,4 +20,6 @@ export type {
   PersonTripStats,
   JournalSplitMode,
   SuperlativeId,
+  OnboardingPrompts,
+  DailyLog,
 } from "./trip.js";

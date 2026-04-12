@@ -10,12 +10,16 @@ import {
   Plus,
   Map as MapIcon,
   ImageIcon,
+  SwitchCamera,
+  User,
+  ClipboardList,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useTrip, useScheduleConflicts } from "../hooks/useTrip";
 import { useJournal } from "../hooks/useJournal";
 import { useTripSpend } from "../hooks/useTripSpend";
 import { useAuth } from "../hooks/useAuth";
-import { getGuestName, setGuestName } from "../hooks/useGuestIdentity";
+import { useCurrentMember, fetchTripMembers, saveToken, getSavedToken } from "../hooks/useMemberIdentity";
 import { TripHeader } from "../components/TripHeader";
 import { DestinationTabs } from "../components/DestinationTabs";
 import { DayTabs } from "../components/DayTabs";
@@ -26,15 +30,30 @@ import { HotelCard } from "../components/HotelCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { JournalModal } from "../components/JournalModal";
 import { TripMapPanel, collectDestinationMapPoints } from "../components/TripMapPanel";
-import { CollabJoinModal } from "../components/CollabJoinModal";
+import { WhoAreYou, MemberAvatarBadge } from "../components/identity/WhoAreYou";
+import { MemberOnboarding } from "../components/identity/MemberOnboarding";
+import { DailyLogModal } from "../components/DailyLogModal";
+import { MemberProfile } from "../components/profile/MemberProfile";
 import { cn } from "../lib/cn";
 import { MOCK_TRIP } from "../lib/mock-data";
 import { supabase } from "../lib/supabase";
 import { personDisplayKey } from "../lib/trip-report";
 import { collectPhotosFromEntries, journalEntriesForDay } from "../lib/journal-photos";
+import type { TripMember } from "@pangofold/shared";
 
 type ViewTab = "itinerary" | "food" | "activities" | "map";
 type ItineraryFilter = "all" | "food" | "activity";
+
+function formatTripDate(iso: string): string {
+  try {
+    return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 async function filesToGuestPhotos(
   files: File[],
@@ -82,10 +101,116 @@ export function TripView() {
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
   const [gate, setGate] = useState<"checking" | "bad" | "ok">(() => (isCollab ? "checking" : "ok"));
-  const [guestOverride, setGuestOverride] = useState<string | null>(null);
 
   const [collabVerifyError, setCollabVerifyError] = useState<string | null>(null);
   const [journalActionError, setJournalActionError] = useState<string | null>(null);
+
+  // ── New identity system ──────────────────────────────────────────────────
+  const { state: memberState, setMember, logout: logoutMember } = useCurrentMember(
+    isCollab ? id : undefined,
+  );
+  const [identityScreen, setIdentityScreen] = useState<"who" | "onboard" | null>(null);
+  const [carouselMembers, setCarouselMembers] = useState<TripMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [dailyLogOpen, setDailyLogOpen] = useState(false);
+  const [todayLogExists, setTodayLogExists] = useState(false);
+  // Owner profile prompt
+  const [ownerMissingProfile, setOwnerMissingProfile] = useState(false);
+  const [ownerOnboarding, setOwnerOnboarding] = useState(false);
+  const [ownerMemberProfile, setOwnerMemberProfile] = useState<TripMember | null>(null);
+
+  // Resolve guest identity once gate is "ok"
+  useEffect(() => {
+    if (!isCollab || gate !== "ok" || !id) return;
+    if (memberState.status === "loading") return;
+    if (memberState.status === "identified") {
+      setIdentityScreen(null);
+      return;
+    }
+    // Unknown → show who-are-you
+    setLoadingMembers(true);
+    void fetchTripMembers(id).then((ms) => {
+      setCarouselMembers(ms);
+      setLoadingMembers(false);
+      setIdentityScreen("who");
+    });
+  }, [isCollab, gate, id, memberState.status]);
+
+  // Check if owner has a member profile
+  useEffect(() => {
+    if (!user?.id || !dbTrip?.id || isCollab) return;
+    if (dbTrip.ownerId !== user.id) return;
+    void supabase
+      .from("trip_members")
+      .select("*")
+      .eq("trip_id", dbTrip.id)
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          const m: TripMember = {
+            id: data.id,
+            tripId: data.trip_id,
+            userId: data.user_id,
+            role: data.role,
+            createdAt: data.created_at,
+            displayName: data.display_name,
+            avatarUrl: data.avatar_url,
+            bioBurb: data.bio_blurb,
+            funFact: data.fun_fact,
+            onboardingCompleted: data.onboarding_completed,
+            localStorageToken: data.local_storage_token,
+            onboardingPromptAnswer: data.onboarding_prompt_answer,
+          };
+          setOwnerMemberProfile(m);
+          if (m.localStorageToken) saveToken(dbTrip.id, m.localStorageToken);
+          setOwnerMissingProfile(false);
+        } else {
+          setOwnerMissingProfile(true);
+        }
+      });
+  }, [user?.id, dbTrip?.id, dbTrip?.ownerId, isCollab]);
+
+  // Check if today's daily log exists for current member
+  useEffect(() => {
+    const memberId = isCollab
+      ? (memberState.status === "identified" ? memberState.member.id : null)
+      : ownerMemberProfile?.id ?? null;
+    if (!memberId || !id) return;
+    const today = new Date().toISOString().slice(0, 10);
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { data } = await supabase
+          .from("daily_logs")
+          .select("id")
+          .eq("trip_id", id)
+          .eq("member_id", memberId)
+          .eq("log_date", today)
+          .maybeSingle();
+        setTodayLogExists(Boolean(data));
+        return;
+      }
+      const token = getSavedToken(id);
+      if (!token) {
+        setTodayLogExists(false);
+        return;
+      }
+      const { data, error } = await supabase.rpc("guest_get_daily_log", {
+        p_token: token,
+        p_log_date: today,
+      });
+      if (error || !data || !Array.isArray(data)) {
+        setTodayLogExists(false);
+        return;
+      }
+      setTodayLogExists(data.length > 0);
+    })();
+  }, [isCollab, memberState, ownerMemberProfile?.id, id]);
 
   useEffect(() => {
     if (!user?.id || !dbTrip?.id) {
@@ -139,9 +264,13 @@ export function TripView() {
       });
   }, [isCollab, id, tokenFromUrl]);
 
-  const storedGuestName = id ? getGuestName(id) : null;
-  const guestName = guestOverride ?? storedGuestName;
-  const showJoinModal = isCollab && gate === "ok" && !guestName;
+  // Derive current member display name for collab or owner
+  const currentMember =
+    isCollab && memberState.status === "identified"
+      ? memberState.member
+      : (!isCollab ? ownerMemberProfile : null);
+  const guestName = currentMember?.displayName ?? null;
+  // showJoinModal removed — replaced by WhoAreYou identity overlay
 
   const useMock = !isCollab && !dbTrip && !loading;
   const trip = dbTrip || (useMock ? MOCK_TRIP : null);
@@ -180,7 +309,7 @@ export function TripView() {
 
   const capturedByLabel = isCollab
     ? guestName || "—"
-    : user?.email?.split("@")[0] || user?.email || "Signed in";
+    : currentMember?.displayName || user?.email?.split("@")[0] || user?.email || "Signed in";
 
   const handleEnrich = useCallback(async () => {
     if (!dbTrip || useMock) return;
@@ -360,16 +489,95 @@ export function TripView() {
   const showJournalFab =
     !useMock && !isCollab && dbPhase === "active" && canJournal && !readOnlyTrip;
 
+  // Day number for daily log (1-based from trip start or day tab index)
+  const currentDayNumber = dayIndex + 1;
+  const currentMemberId = currentMember?.id ?? null;
+
   return (
     <div className="min-h-dvh bg-surface pb-8">
-      <CollabJoinModal
-        open={showJoinModal}
-        tripTitle={trip.title}
-        onSave={(name) => {
-          if (id) setGuestName(id, name);
-          setGuestOverride(name);
-        }}
-      />
+      {/* ── Identity overlays ── */}
+      {isCollab && identityScreen === "who" && id && (
+        <WhoAreYou
+          tripTitle={trip.title}
+          tripDates={
+            trip.startDate && trip.endDate
+              ? `${formatTripDate(trip.startDate)} – ${formatTripDate(trip.endDate)}`
+              : undefined
+          }
+          members={carouselMembers}
+          loading={loadingMembers}
+          onSelect={(member) => {
+            setMember(member);
+            setIdentityScreen(null);
+          }}
+          onNewMember={() => setIdentityScreen("onboard")}
+        />
+      )}
+
+      {isCollab && identityScreen === "onboard" && id && (
+        <MemberOnboarding
+          tripId={id}
+          prompts={dbTrip?.onboardingPrompts}
+          onComplete={(member) => {
+            setMember(member);
+            setIdentityScreen(null);
+          }}
+          onBack={() => setIdentityScreen("who")}
+        />
+      )}
+
+      {/* Owner onboarding overlay */}
+      {!isCollab && ownerOnboarding && id && user?.id && (
+        <MemberOnboarding
+          tripId={id}
+          ownerId={user.id}
+          prompts={dbTrip?.onboardingPrompts}
+          onComplete={(member) => {
+            setOwnerMemberProfile(member);
+            setOwnerMissingProfile(false);
+            setOwnerOnboarding(false);
+          }}
+          onBack={() => setOwnerOnboarding(false)}
+        />
+      )}
+
+      {/* Daily log modal */}
+      {dailyLogOpen && currentMemberId && id && (
+        <DailyLogModal
+          tripId={id}
+          memberId={currentMemberId}
+          dayNumber={currentDayNumber}
+          customPrompt={dbTrip?.dailyLogPrompt ?? undefined}
+          onClose={() => setDailyLogOpen(false)}
+          onSaved={() => {
+            setTodayLogExists(true);
+            setDailyLogOpen(false);
+          }}
+        />
+      )}
+
+      {/* Member profile sheet */}
+      {profileOpen && currentMember && id && (
+        <MemberProfile
+          member={currentMember}
+          tripId={id}
+          entries={entries}
+          onClose={() => setProfileOpen(false)}
+          onSwitch={isCollab ? () => {
+            logoutMember();
+            setIdentityScreen("who");
+            setProfileOpen(false);
+          } : undefined}
+        />
+      )}
+
+      {/* Profile mini-menu overlay click-away */}
+      {showProfileMenu && (
+        <div
+          className="fixed inset-0 z-[50]"
+          onClick={() => setShowProfileMenu(false)}
+        />
+      )}
 
       <JournalModal
         key={`${journalItemId ?? "new"}-${isCollab ? "g" : "m"}`}
@@ -428,6 +636,70 @@ export function TripView() {
       />
 
       <div className="max-w-lg mx-auto">
+        {/* Profile badge top-right */}
+        {currentMember && (
+          <div className="relative">
+            <div className="absolute top-4 right-4 z-40">
+              <MemberAvatarBadge
+                member={currentMember}
+                size={36}
+                onClick={() => setShowProfileMenu((v) => !v)}
+              />
+              <AnimatePresence>
+                {showProfileMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.92, y: -8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.92, y: -8 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    className="absolute right-0 top-10 w-52 rounded-2xl bg-[#1a1a1a] border border-white/10 shadow-2xl overflow-hidden z-50"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-4 py-3 border-b border-white/5">
+                      <p className="text-sm font-bold text-white">{currentMember.displayName}</p>
+                      {currentMember.onboardingPromptAnswer && (
+                        <p className="text-xs text-white/40 mt-0.5 line-clamp-1">
+                          {currentMember.onboardingPromptAnswer}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left"
+                      onClick={() => { setProfileOpen(true); setShowProfileMenu(false); }}
+                    >
+                      <User className="w-4 h-4 text-teal-400" />
+                      View my profile
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left"
+                      onClick={() => { setDailyLogOpen(true); setShowProfileMenu(false); }}
+                    >
+                      <ClipboardList className="w-4 h-4 text-teal-400" />
+                      Daily check-in
+                    </button>
+                    {isCollab && (
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/[0.06] transition-colors text-left border-t border-white/5"
+                        onClick={() => {
+                          logoutMember();
+                          setIdentityScreen("who");
+                          setShowProfileMenu(false);
+                        }}
+                      >
+                        <SwitchCamera className="w-4 h-4 text-white/40" />
+                        Switch person
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        )}
+
         <TripHeader
           trip={trip}
           editable={!useMock && !isCollab}
@@ -440,6 +712,71 @@ export function TripView() {
               : undefined
           }
         />
+
+        {/* Owner missing profile banner */}
+        {!isCollab && ownerMissingProfile && isOwner && !ownerOnboarding && (
+          <div className="px-5 mb-3">
+            <div className="rounded-2xl border border-teal-500/30 bg-teal-500/5 px-4 py-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-teal-300">Create a profile for yourself</p>
+                <p className="text-xs text-teal-400/70 mt-0.5">
+                  So the crew can see you in the Wrapped and check-ins.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOwnerOnboarding(true)}
+                className="shrink-0 text-xs font-semibold text-white px-3 py-1.5 rounded-xl"
+                style={{ background: "linear-gradient(135deg, #2DD4BF, #0891b2)" }}
+              >
+                Set up
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Daily check-in nudge card */}
+        {currentMemberId && !todayLogExists && (trip.phase === "active" || isCollab) && (
+          <div className="px-5 mb-3">
+            <button
+              type="button"
+              onClick={() => setDailyLogOpen(true)}
+              className="w-full rounded-2xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 flex items-center justify-between gap-3 hover:bg-teal-500/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-teal-500/20 flex items-center justify-center">
+                  <motion.div
+                    animate={{ scale: [1, 1.15, 1] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                    className="w-2.5 h-2.5 rounded-full bg-teal-400"
+                  />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-teal-300">
+                    Day {currentDayNumber} check-in waiting
+                  </p>
+                  <p className="text-xs text-teal-400/60">Steps, food, funniest moment…</p>
+                </div>
+              </div>
+              <ClipboardList className="w-4 h-4 text-teal-400/60 shrink-0" />
+            </button>
+          </div>
+        )}
+
+        {currentMemberId && todayLogExists && (trip.phase === "active" || isCollab) && (
+          <div className="px-5 mb-3">
+            <button
+              type="button"
+              onClick={() => setDailyLogOpen(true)}
+              className="w-full rounded-2xl border border-white/5 bg-white/[0.03] px-4 py-2.5 flex items-center gap-3 text-left hover:bg-white/[0.05] transition-colors"
+            >
+              <div className="w-6 h-6 rounded-full bg-teal-500/20 flex items-center justify-center">
+                <div className="w-2 h-2 rounded-full bg-teal-400" />
+              </div>
+              <p className="text-xs text-white/40">Day {currentDayNumber} check-in logged · tap to edit</p>
+            </button>
+          </div>
+        )}
 
         {showTripSpendStrip && (
           <div className="px-5 mb-3 sticky top-0 z-30 bg-surface/95 backdrop-blur border-b border-border py-3 -mx-0">
@@ -516,10 +853,10 @@ export function TripView() {
           </div>
         )}
 
-        {isCollab && gate === "ok" && (
+        {isCollab && gate === "ok" && guestName && (
           <div className="px-5 mb-3">
             <p className="text-xs text-text-muted mb-2 rounded-xl bg-primary/5 border border-primary/10 px-3 py-2">
-              You’re logging as <strong>{guestName ?? "…"}</strong> — memories save to this trip for everyone on the
+              You’re logging as <strong>{guestName}</strong> — memories save to this trip for everyone on the
               link.
             </p>
             <button

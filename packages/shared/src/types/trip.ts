@@ -16,7 +16,15 @@ export interface Trip {
   /** Present when loaded via owner-only RPC; omitted from public trip fetches. */
   collaborationEnabled?: boolean;
   collaborateToken?: string | null;
+  onboardingPrompts?: OnboardingPrompts | null;
+  dailyLogPrompt?: string | null;
   destinations: Destination[];
+}
+
+export interface OnboardingPrompts {
+  prompt_1: string;
+  prompt_2: string;
+  fun_fact: string;
 }
 
 export interface Destination {
@@ -113,6 +121,7 @@ export interface JournalPhoto {
   sortOrder: number;
   caption?: string | null;
   publicUrl?: string | null;
+  isReceipt?: boolean;
 }
 
 export type JournalSplitMode = "equal" | "full_amount" | "group_split";
@@ -146,10 +155,33 @@ export type TripMemberRole = "viewer" | "editor";
 export interface TripMember {
   id: string;
   tripId: string;
-  userId: string;
+  userId?: string | null;
   role: TripMemberRole;
   invitedEmail?: string | null;
   createdAt: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  bioBurb?: string | null;
+  funFact?: string | null;
+  onboardingPromptAnswer?: string | null;
+  onboardingCompleted?: boolean;
+  localStorageToken?: string;
+}
+
+export interface DailyLog {
+  id: string;
+  tripId: string;
+  memberId: string;
+  logDate: string;
+  stepsCount?: number | null;
+  moodScore?: number | null;
+  bestFoodText?: string | null;
+  bestFoodPhotoUrl?: string | null;
+  worstFoodText?: string | null;
+  funniestMoment?: string | null;
+  customPromptAnswer?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PersonTripStats {

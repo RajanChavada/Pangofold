@@ -21,6 +21,8 @@ interface UseTripResult {
     phase?: Trip["phase"];
     defaultSplitCount?: number;
     coverImageUrl?: string | null;
+    onboardingPrompts?: Trip["onboardingPrompts"];
+    dailyLogPrompt?: string | null;
   }) => Promise<void>;
 }
 
@@ -64,7 +66,7 @@ export function useTrip(tripId: string | undefined): UseTripResult {
       const { data: tripRow, error: tripErr } = await supabase
         .from("trips")
         .select(
-          "id, title, cover_image_url, start_date, end_date, source_doc_url, owner_id, share_slug, raw_doc_text, created_at, phase, default_split_count",
+          "id, title, cover_image_url, start_date, end_date, source_doc_url, owner_id, share_slug, raw_doc_text, created_at, phase, default_split_count, onboarding_prompts, daily_log_prompt",
         )
         .eq("id", tripId)
         .single();
@@ -218,12 +220,16 @@ export function useTrip(tripId: string | undefined): UseTripResult {
       phase?: Trip["phase"];
       defaultSplitCount?: number;
       coverImageUrl?: string | null;
+      onboardingPrompts?: Trip["onboardingPrompts"];
+      dailyLogPrompt?: string | null;
     }) => {
       if (!tripId) return;
       const row: Record<string, unknown> = {};
       if (patch.phase !== undefined) row.phase = patch.phase;
       if (patch.defaultSplitCount !== undefined) row.default_split_count = patch.defaultSplitCount;
       if (patch.coverImageUrl !== undefined) row.cover_image_url = patch.coverImageUrl;
+      if (patch.onboardingPrompts !== undefined) row.onboarding_prompts = patch.onboardingPrompts;
+      if (patch.dailyLogPrompt !== undefined) row.daily_log_prompt = patch.dailyLogPrompt;
       if (Object.keys(row).length === 0) return;
       await supabase.from("trips").update(row).eq("id", tripId);
       setTrip((prev) => {
@@ -232,6 +238,8 @@ export function useTrip(tripId: string | undefined): UseTripResult {
         if (patch.phase !== undefined) next.phase = patch.phase;
         if (patch.defaultSplitCount !== undefined) next.defaultSplitCount = patch.defaultSplitCount;
         if (patch.coverImageUrl !== undefined) next.coverImageUrl = patch.coverImageUrl ?? undefined;
+        if (patch.onboardingPrompts !== undefined) next.onboardingPrompts = patch.onboardingPrompts ?? null;
+        if (patch.dailyLogPrompt !== undefined) next.dailyLogPrompt = patch.dailyLogPrompt ?? null;
         return next;
       });
     },

@@ -17,7 +17,7 @@ import { useJournal } from "../hooks/useJournal";
 import { useAuth } from "../hooks/useAuth";
 import { buildTripReportPayload } from "../lib/trip-report";
 import { supabase } from "../lib/supabase";
-import type { Trip, SuperlativeId } from "@pangofold/shared";
+import type { DailyLog, Trip, TripMember, SuperlativeId } from "@pangofold/shared";
 import { WrappedStory } from "../components/wrapped/WrappedStory";
 
 const SUPERLATIVE_COPY: Record<
@@ -68,6 +68,62 @@ export function TripReport() {
   const [memberChecked, setMemberChecked] = useState(false);
   const [exporting, setExporting] = useState(false);
   const shareCardRef = useRef<HTMLDivElement>(null);
+  const [tripMembers, setTripMembers] = useState<TripMember[]>([]);
+  const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
+
+  // Fetch member profiles and daily logs for the enhanced Wrapped
+  useEffect(() => {
+    if (!id) return;
+    void supabase
+      .from("trip_members")
+      .select("*")
+      .eq("trip_id", id)
+      .eq("onboarding_completed", true)
+      .then(({ data }) => {
+        if (!data) return;
+        setTripMembers(
+          data.map((r) => ({
+            id: r.id,
+            tripId: r.trip_id,
+            userId: r.user_id,
+            role: r.role,
+            createdAt: r.created_at,
+            displayName: r.display_name,
+            avatarUrl: r.avatar_url,
+            bioBurb: r.bio_blurb,
+            funFact: r.fun_fact,
+            onboardingCompleted: r.onboarding_completed,
+            localStorageToken: r.local_storage_token,
+            onboardingPromptAnswer: r.onboarding_prompt_answer,
+          })),
+        );
+      });
+    void supabase
+      .from("daily_logs")
+      .select("*")
+      .eq("trip_id", id)
+      .order("log_date", { ascending: true })
+      .then(({ data }) => {
+        if (!data) return;
+        setDailyLogs(
+          data.map((r) => ({
+            id: r.id,
+            tripId: r.trip_id,
+            memberId: r.member_id,
+            logDate: r.log_date,
+            stepsCount: r.steps_count ?? null,
+            moodScore: r.mood_score ?? null,
+            bestFoodText: r.best_food_text ?? null,
+            bestFoodPhotoUrl: r.best_food_photo_url ?? null,
+            worstFoodText: r.worst_food_text ?? null,
+            funniestMoment: r.funniest_moment ?? null,
+            customPromptAnswer: r.custom_prompt_answer ?? null,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+          })),
+        );
+      });
+  }, [id]);
 
   useEffect(() => {
     if (!trip || !user) {
@@ -207,6 +263,8 @@ export function TripReport() {
           trip={trip}
           payload={payload}
           entries={entries}
+          members={tripMembers}
+          dailyLogs={dailyLogs}
           exportRef={shareCardRef}
         />
 
