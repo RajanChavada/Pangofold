@@ -682,6 +682,13 @@ export function TripView() {
           entries={entries}
           dailyLogsVersion={memberProfileDailyVersion}
           onClose={() => setProfileOpen(false)}
+          onMemberUpdated={(patch) => {
+            if (isCollab && memberState.status === "identified") {
+              setMember({ ...memberState.member, ...patch });
+            } else if (!isCollab && ownerMemberProfile) {
+              setOwnerMemberProfile({ ...ownerMemberProfile, ...patch });
+            }
+          }}
           onSwitch={isCollab ? () => {
             logoutMember();
             setIdentityScreen("who");

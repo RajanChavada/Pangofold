@@ -28,7 +28,17 @@ type PersonalSlide =
   | { kind: "funniest"; moment: string }
   | { kind: "steps"; total: number; best: number; bestDay: string }
   | { kind: "mood"; scores: number[] }
-  | { kind: "outro" };
+  | {
+      kind: "summary";
+      totalSpendCents: number;
+      photoCount: number;
+      checkInDays: number;
+      journalCount: number;
+      totalSteps: number;
+      peakMoodDay: number | null;
+      bestFoodSnippet: string | null;
+      funniestSnippet: string | null;
+    };
 
 function buildPersonalSlides(
   entries: JournalEntry[],
@@ -91,8 +101,54 @@ function buildPersonalSlides(
     slides.push({ kind: "mood", scores: moodLogs.map((l) => l.moodScore!) });
   }
 
-  slides.push({ kind: "outro" });
+  const photoCount = entries.flatMap((e) => e.photos ?? []).filter((p) => p.publicUrl).length;
+  const moodLogsForPeak = logs.filter((l) => l.moodScore != null);
+  let peakMoodDay: number | null = null;
+  if (moodLogsForPeak.length > 0) {
+    const peak = Math.max(...moodLogsForPeak.map((l) => l.moodScore!));
+    const idx = moodLogsForPeak.findIndex((l) => l.moodScore === peak);
+    peakMoodDay = idx >= 0 ? idx + 1 : null;
+  }
+  const bestFoodSnippet =
+    logs.find((l) => l.bestFoodText)?.bestFoodText?.slice(0, 72) ?? null;
+  const funniestSnippet =
+    logs.find((l) => l.funniestMoment)?.funniestMoment?.slice(0, 72) ?? null;
+  const totalStepsAll = logs.reduce((s, l) => s + (l.stepsCount ?? 0), 0);
+
+  slides.push({
+    kind: "summary",
+    totalSpendCents: totalCents,
+    photoCount,
+    checkInDays: logs.length,
+    journalCount: entries.length,
+    totalSteps: totalStepsAll,
+    peakMoodDay,
+    bestFoodSnippet,
+    funniestSnippet,
+  });
   return slides;
+}
+
+function SlideCornerBadge({ member, initials }: { member: TripMember; initials: string }) {
+  const first = member.displayName?.split(" ")[0] ?? "You";
+  return (
+    <div className="absolute top-5 left-5 z-10 flex items-center gap-2 rounded-full bg-surface-card/95 border border-border/80 px-2 py-1.5 pr-3 shadow-sm max-w-[78%]">
+      <div
+        className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center text-xs font-bold text-text border-2"
+        style={{
+          borderColor: TEAL,
+          background: member.avatarUrl ? undefined : `linear-gradient(135deg, ${TEAL}, #0891b2)`,
+        }}
+      >
+        {member.avatarUrl ? (
+          <img src={member.avatarUrl} alt="" className="w-full h-full object-cover" />
+        ) : (
+          initials
+        )}
+      </div>
+      <span className="text-[11px] font-bold truncate text-text">{first}</span>
+    </div>
+  );
 }
 
 function AnimatedNumber({ value }: { value: number }) {
@@ -250,7 +306,8 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "spend":
         return (
-          <div className={cn("flex h-full flex-col justify-center px-8 text-text", g)}>
+          <div className={cn("relative flex h-full flex-col justify-center px-8 text-text", g)}>
+            <SlideCornerBadge member={member} initials={initials} />
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>You spent</p>
             <div className="text-5xl font-black">
               <AnimatedCents cents={slide.totalCents} />
@@ -269,7 +326,8 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "food":
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-5 px-8 text-text", g)}>
+          <div className={cn("relative flex h-full flex-col justify-center gap-5 px-8 text-text", g)}>
+            <SlideCornerBadge member={member} initials={initials} />
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em]", sub)}>The verdict</p>
             {slide.bestFood && (
               <div className="rounded-2xl bg-surface-card/90 border border-border p-5 shadow-sm">
@@ -288,7 +346,8 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "photos":
         return (
-          <div className={cn("flex h-full flex-col p-6 text-text", g)}>
+          <div className={cn("relative flex h-full flex-col p-6 text-text", g)}>
+            <SlideCornerBadge member={member} initials={initials} />
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
               Your reel · {slide.urls.length} photos
             </p>
@@ -310,7 +369,13 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
 
       case "funniest":
         return (
-          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-text", g)}>
+          <div
+            className={cn(
+              "relative flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-text",
+              g,
+            )}
+          >
+            <SlideCornerBadge member={member} initials={initials} />
             <p className="text-6xl">😂</p>
             <div>
               <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
@@ -328,7 +393,8 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
           day: "numeric",
         });
         return (
-          <div className={cn("flex h-full flex-col justify-center px-8 text-text", g)}>
+          <div className={cn("relative flex h-full flex-col justify-center px-8 text-text", g)}>
+            <SlideCornerBadge member={member} initials={initials} />
             <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-4", sub)}>
               You walked
             </p>
@@ -348,7 +414,8 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
         const peak = Math.max(...slide.scores);
         const peakIdx = slide.scores.indexOf(peak);
         return (
-          <div className={cn("flex h-full flex-col justify-center gap-6 px-8 text-text", g)}>
+          <div className={cn("relative flex h-full flex-col justify-center gap-6 px-8 text-text", g)}>
+            <SlideCornerBadge member={member} initials={initials} />
             <div>
               <p className={cn("text-xs font-semibold uppercase tracking-[0.35em] mb-2", sub)}>
                 Your mood arc
@@ -380,23 +447,97 @@ export function PersonalWrapped({ member, entries, dailyLogs, onClose }: Persona
         );
       }
 
-      case "outro":
+      case "summary": {
+        const fmtMoney = (cents: number) =>
+          new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
         return (
-          <div className={cn("flex h-full flex-col items-center justify-center gap-6 px-8 text-center text-text", g)}>
+          <div className={cn("relative flex h-full min-h-0 flex-col overflow-hidden text-text", g)}>
             <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl bg-primary/10 border border-primary/30"
-            >
-              ✦
-            </div>
-            <div>
-              <h2 className="text-2xl font-black">That's your trip</h2>
-              <p className={cn("mt-3 text-sm leading-relaxed", sub)}>
-                The group Wrapped is coming at the end. <br />
-                Your funniest moment will be revealed.
+              className="pointer-events-none absolute inset-0 opacity-40"
+              style={{
+                background: `radial-gradient(ellipse 120% 80% at 50% 100%, ${TEAL}40, transparent 55%)`,
+              }}
+            />
+            <div className="relative z-[1] flex min-h-0 flex-1 flex-col px-7 pt-9 pb-4">
+              <p className={cn("text-center text-xs font-semibold uppercase tracking-[0.35em]", sub)}>
+                Your trip recap
               </p>
+              <h2 className="mt-2 text-center text-2xl font-black leading-tight">
+                {member.displayName ?? "You"}
+              </h2>
+              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto text-sm leading-snug">
+                {slide.totalSpendCents > 0 && (
+                  <p>
+                    <span className="text-text-muted">Spent · </span>
+                    <span className="font-bold tabular-nums">{fmtMoney(slide.totalSpendCents)}</span>
+                  </p>
+                )}
+                {slide.totalSteps > 0 && (
+                  <p>
+                    <span className="text-text-muted">Steps · </span>
+                    <span className="font-bold tabular-nums">{slide.totalSteps.toLocaleString()}</span>
+                  </p>
+                )}
+                <p>
+                  <span className="text-text-muted">Journal · </span>
+                  <span className="font-bold">
+                    {slide.journalCount} {slide.journalCount === 1 ? "entry" : "entries"}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-text-muted">Check-ins · </span>
+                  <span className="font-bold">
+                    {slide.checkInDays} {slide.checkInDays === 1 ? "day" : "days"}
+                  </span>
+                </p>
+                {slide.photoCount > 0 && (
+                  <p>
+                    <span className="text-text-muted">Photos · </span>
+                    <span className="font-bold tabular-nums">{slide.photoCount}</span>
+                  </p>
+                )}
+                {slide.peakMoodDay != null && (
+                  <p>
+                    <span className="text-text-muted">Mood peak · </span>
+                    <span className="font-bold">Day {slide.peakMoodDay}</span>
+                  </p>
+                )}
+                {slide.bestFoodSnippet && (
+                  <p className="pt-1">
+                    <span className="text-text-muted">Best bite · </span>
+                    <span className="font-medium">"{slide.bestFoodSnippet}"</span>
+                  </p>
+                )}
+                {slide.funniestSnippet && (
+                  <p>
+                    <span className="text-text-muted">Funniest · </span>
+                    <span className="font-medium">"{slide.funniestSnippet}"</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-4 flex shrink-0 flex-col items-center">
+                <div
+                  className="flex h-[7.25rem] w-[7.25rem] items-center justify-center overflow-hidden rounded-full text-3xl font-bold text-white shadow-2xl"
+                  style={{
+                    boxShadow: `0 16px 48px rgba(0,0,0,0.14), 0 0 0 5px ${TEAL}`,
+                    background: member.avatarUrl ? undefined : `linear-gradient(135deg, ${TEAL}, #0891b2)`,
+                  }}
+                >
+                  {member.avatarUrl ? (
+                    <img src={member.avatarUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    initials
+                  )}
+                </div>
+                <p className={cn("mt-4 max-w-[90%] text-center text-xs leading-relaxed", sub)}>
+                  That's your story — group Wrapped still has the big reveal.
+                </p>
+              </div>
             </div>
           </div>
         );
+      }
 
       default:
         return null;

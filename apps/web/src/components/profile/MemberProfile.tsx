@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -10,10 +10,11 @@ import {
   Image as ImageIcon,
   Footprints,
   ChevronRight,
+  Camera,
 } from "lucide-react";
 import type { DailyLog, JournalEntry, TripMember } from "@pangofold/shared";
 import { supabase } from "../../lib/supabase";
-import { getSavedToken } from "../../hooks/useMemberIdentity";
+import { getSavedToken, uploadMemberAvatar } from "../../hooks/useMemberIdentity";
 import { cn } from "../../lib/cn";
 import { PersonalWrapped } from "../wrapped/PersonalWrapped";
 
@@ -34,6 +35,8 @@ interface MemberProfileProps {
   entries: JournalEntry[];
   onClose: () => void;
   onSwitch?: () => void;
+  /** Called after profile fields change locally (e.g. new avatar URL). */
+  onMemberUpdated?: (patch: Partial<Pick<TripMember, "avatarUrl">>) => void;
   /** Increment after saving a daily check-in so steps / timeline refetch (guest + signed-in). */
   dailyLogsVersion?: number;
 }
@@ -72,8 +75,13 @@ export function MemberProfile({
   entries,
   onClose,
   onSwitch,
+  onMemberUpdated,
   dailyLogsVersion = 0,
 }: MemberProfileProps) {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [localAvatarUrl, setLocalAvatarUrl] = useState<string | null>(member.avatarUrl ?? null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
   const [editingBlurb, setEditingBlurb] = useState(false);
   const [blurbDraft, setBlurbDraft] = useState(member.bioBurb ?? "");
   const [savingBlurb, setSavingBlurb] = useState(false);
@@ -85,6 +93,62 @@ export function MemberProfile({
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [showWrapped, setShowWrapped] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalAvatarUrl(member.avatarUrl ?? null);
+  }, [member.avatarUrl]);
+
+  const avatarMember = useMemo(
+    () => ({ ...member, avatarUrl: localAvatarUrl ?? member.avatarUrl ?? null }),
+    [member, localAvatarUrl],
+  );
+
+  const handleAvatarFile = useCallback(
+    async (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file || !file.type.startsWith("image/")) return;
+      setAvatarUploading(true);
+      const url = await uploadMemberAvatar(member.id, file);
+      if (!url) {
+        setAvatarUploading(false);
+        return;
+      }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { error } = await supabase
+          .from("trip_members")
+          .update({ avatar_url: url })
+          .eq("id", member.id);
+        if (error) {
+          console.error("avatar update", error);
+          setAvatarUploading(false);
+          return;
+        }
+      } else {
+        const token = getSavedToken(tripId);
+        if (!token) {
+          setAvatarUploading(false);
+          return;
+        }
+        const { error } = await supabase.rpc("guest_update_member_avatar", {
+          p_token: token,
+          p_avatar_url: url,
+        });
+        if (error) {
+          console.error("guest_update_member_avatar", error);
+          setAvatarUploading(false);
+          return;
+        }
+      }
+      setLocalAvatarUrl(url);
+      onMemberUpdated?.({ avatarUrl: url });
+      setAvatarUploading(false);
+    },
+    [member.id, tripId, onMemberUpdated],
+  );
 
   // Fetch daily logs (guests: RLS blocks direct SELECT — use guest_list_my_daily_logs RPC)
   useEffect(() => {
@@ -271,7 +335,29 @@ export function MemberProfile({
 
             {/* Avatar overlapping gradient */}
             <div className="absolute left-5" style={{ bottom: -32 }}>
-              <MemberAvatar member={member} size={72} />
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarFile}
+              />
+              <div className="relative">
+                <MemberAvatar member={avatarMember} size={72} />
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                  title="Change profile photo"
+                  className="absolute -bottom-0.5 -right-0.5 w-8 h-8 rounded-full border-2 border-surface-card bg-surface-muted flex items-center justify-center text-text-muted hover:text-text hover:bg-surface transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {avatarUploading ? (
+                    <span className="w-3.5 h-3.5 border-2 border-teal-400/30 border-t-teal-400 rounded-full animate-spin" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -489,7 +575,7 @@ export function MemberProfile({
       <AnimatePresence>
         {showWrapped && (
           <PersonalWrapped
-            member={member}
+            member={avatarMember}
             entries={memberEntries}
             dailyLogs={dailyLogs}
             onClose={() => setShowWrapped(false)}
