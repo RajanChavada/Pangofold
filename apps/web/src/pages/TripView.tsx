@@ -125,6 +125,7 @@ export function TripView() {
   const [dailyLogFocus, setDailyLogFocus] = useState<DailyLogFocus>("full");
   const [logActionsOpen, setLogActionsOpen] = useState(false);
   const [todayLogExists, setTodayLogExists] = useState(false);
+  const [memberProfileDailyVersion, setMemberProfileDailyVersion] = useState(0);
   // Owner profile prompt
   const [ownerMissingProfile, setOwnerMissingProfile] = useState(false);
   const [ownerOnboarding, setOwnerOnboarding] = useState(false);
@@ -660,6 +661,7 @@ export function TripView() {
           }}
           onSaved={() => {
             setTodayLogExists(true);
+            setMemberProfileDailyVersion((v) => v + 1);
             setDailyLogOpen(false);
             setDailyLogFocus("full");
           }}
@@ -678,6 +680,7 @@ export function TripView() {
           member={currentMember}
           tripId={id}
           entries={entries}
+          dailyLogsVersion={memberProfileDailyVersion}
           onClose={() => setProfileOpen(false)}
           onSwitch={isCollab ? () => {
             logoutMember();

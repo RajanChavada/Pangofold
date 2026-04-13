@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { DailyLog, JournalEntry, TripMember } from "@pangofold/shared";
 import { supabase } from "../../lib/supabase";
+import { getSavedToken } from "../../hooks/useMemberIdentity";
 import { cn } from "../../lib/cn";
 import { PersonalWrapped } from "../wrapped/PersonalWrapped";
 
@@ -33,6 +34,8 @@ interface MemberProfileProps {
   entries: JournalEntry[];
   onClose: () => void;
   onSwitch?: () => void;
+  /** Increment after saving a daily check-in so steps / timeline refetch (guest + signed-in). */
+  dailyLogsVersion?: number;
 }
 
 interface ReceiptPhoto {
@@ -43,7 +46,34 @@ interface ReceiptPhoto {
   amountCents: number | null;
 }
 
-export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: MemberProfileProps) {
+function mapDailyLogRow(r: Record<string, unknown>): DailyLog {
+  return {
+    id: r.id as string,
+    tripId: r.trip_id as string,
+    memberId: r.member_id as string,
+    logDate: r.log_date as string,
+    stepsCount: (r.steps_count as number | null) ?? null,
+    moodScore: (r.mood_score as number | null) ?? null,
+    bestFoodText: (r.best_food_text as string | null) ?? null,
+    bestFoodPhotoUrl: (r.best_food_photo_url as string | null) ?? null,
+    worstFoodText: (r.worst_food_text as string | null) ?? null,
+    funniestMoment: (r.funniest_moment as string | null) ?? null,
+    customPromptAnswer: (r.custom_prompt_answer as string | null) ?? null,
+    linkedItineraryItemId: (r.linked_itinerary_item_id as string | null) ?? null,
+    activityHighlight: (r.activity_highlight as string | null) ?? null,
+    createdAt: r.created_at as string,
+    updatedAt: r.updated_at as string,
+  };
+}
+
+export function MemberProfile({
+  member,
+  tripId,
+  entries,
+  onClose,
+  onSwitch,
+  dailyLogsVersion = 0,
+}: MemberProfileProps) {
   const [editingBlurb, setEditingBlurb] = useState(false);
   const [blurbDraft, setBlurbDraft] = useState(member.bioBurb ?? "");
   const [savingBlurb, setSavingBlurb] = useState(false);
@@ -56,52 +86,70 @@ export function MemberProfile({ member, tripId, entries, onClose, onSwitch }: Me
   const [showWrapped, setShowWrapped] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  // Fetch daily logs
+  // Fetch daily logs (guests: RLS blocks direct SELECT — use guest_list_my_daily_logs RPC)
   useEffect(() => {
     setLoadingLogs(true);
-    void supabase
-      .from("daily_logs")
-      .select("*")
-      .eq("trip_id", tripId)
-      .eq("member_id", member.id)
-      .order("log_date", { ascending: true })
-      .then(({ data }) => {
-        const mapped = (data ?? []).map((r) => ({
-          id: r.id,
-          tripId: r.trip_id,
-          memberId: r.member_id,
-          logDate: r.log_date,
-          stepsCount: r.steps_count ?? null,
-          moodScore: r.mood_score ?? null,
-          bestFoodText: r.best_food_text ?? null,
-          worstFoodText: r.worst_food_text ?? null,
-          funniestMoment: r.funniest_moment ?? null,
-          customPromptAnswer: r.custom_prompt_answer ?? null,
-          linkedItineraryItemId: (r as { linked_itinerary_item_id?: string }).linked_itinerary_item_id ?? null,
-          activityHighlight: (r as { activity_highlight?: string }).activity_highlight ?? null,
-          createdAt: r.created_at,
-          updatedAt: r.updated_at,
-        }));
-        setDailyLogs(mapped);
-        const linkIds = [...new Set(mapped.map((l) => l.linkedItineraryItemId).filter(Boolean))] as string[];
-        if (linkIds.length > 0) {
-          void supabase
-            .from("itinerary_items")
-            .select("id, title")
-            .in("id", linkIds)
-            .then(({ data: rows }) => {
-              const next: Record<string, string> = {};
-              for (const row of rows ?? []) {
-                next[row.id] = row.title;
-              }
-              setPlanItemTitles(next);
-            });
+    let cancelled = false;
+
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      let mapped: DailyLog[] = [];
+
+      if (session?.user) {
+        const { data } = await supabase
+          .from("daily_logs")
+          .select("*")
+          .eq("trip_id", tripId)
+          .eq("member_id", member.id)
+          .order("log_date", { ascending: true });
+        mapped = (data ?? []).map((r) => mapDailyLogRow(r as unknown as Record<string, unknown>));
+      } else {
+        const token = getSavedToken(tripId);
+        if (!token) {
+          mapped = [];
         } else {
-          setPlanItemTitles({});
+          const { data, error } = await supabase.rpc("guest_list_my_daily_logs", { p_token: token });
+          if (error) {
+            console.error("guest_list_my_daily_logs", error);
+            mapped = [];
+          } else {
+            const rows = Array.isArray(data) ? data : [];
+            mapped = rows
+              .filter((row) => (row as { trip_id?: string }).trip_id === tripId)
+              .map((row) => mapDailyLogRow(row as unknown as Record<string, unknown>));
+          }
         }
-        setLoadingLogs(false);
-      });
-  }, [tripId, member.id]);
+      }
+
+      if (cancelled) return;
+      setDailyLogs(mapped);
+      const linkIds = [...new Set(mapped.map((l) => l.linkedItineraryItemId).filter(Boolean))] as string[];
+      if (linkIds.length > 0) {
+        void supabase
+          .from("itinerary_items")
+          .select("id, title")
+          .in("id", linkIds)
+          .then(({ data: rows }) => {
+            if (cancelled) return;
+            const next: Record<string, string> = {};
+            for (const row of rows ?? []) {
+              next[row.id] = row.title;
+            }
+            setPlanItemTitles(next);
+          });
+      } else {
+        setPlanItemTitles({});
+      }
+      setLoadingLogs(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId, member.id, dailyLogsVersion]);
 
   // Fetch receipt photos for this trip only
   useEffect(() => {
